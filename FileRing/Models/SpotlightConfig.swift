@@ -58,39 +58,86 @@ struct SpotlightConfig: Codable {
     /// Query timeout in seconds
     var queryTimeoutSeconds: Int = 10
 
-    // MARK: - File Management
+    // MARK: - UserDefaults Keys
 
-    private static let configDirectory: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let popUpDir = appSupport.appendingPathComponent("FileRing", isDirectory: true)
-
-        // Create directory if it doesn't exist
-        try? FileManager.default.createDirectory(at: popUpDir, withIntermediateDirectories: true)
-
-        return popUpDir
-    }()
-
-    private static let configFile: URL = {
-        return configDirectory.appendingPathComponent("spotlight-config.json")
-    }()
+    private static let excludedFoldersKey = "FileRingExcludedFolders"
+    private static let excludedExtensionsKey = "FileRingExcludedExtensions"
+    private static let recentDaysKey = "FileRingRecentDays"
+    private static let frequentDaysKey = "FileRingFrequentDays"
+    private static let searchOnlyUserHomeKey = "FileRingSearchOnlyUserHome"
+    private static let cacheSecondsKey = "FileRingCacheSeconds"
+    private static let queryTimeoutSecondsKey = "FileRingQueryTimeoutSeconds"
 
     // MARK: - Loading & Saving
 
-    /// Load configuration from disk, or return default if not found
+    /// Load configuration from UserDefaults, or return default if not found
     static func load() -> SpotlightConfig {
-        guard let data = try? Data(contentsOf: configFile),
-              let config = try? JSONDecoder().decode(SpotlightConfig.self, from: data) else {
-            return SpotlightConfig()
+        let defaults = UserDefaults.standard
+
+        var config = SpotlightConfig()
+
+        // Load arrays if they exist
+        if let folders = defaults.array(forKey: excludedFoldersKey) as? [String] {
+            config.excludedFolders = folders
         }
+
+        if let extensions = defaults.array(forKey: excludedExtensionsKey) as? [String] {
+            config.excludedExtensions = extensions
+        }
+
+        // Load integers if they exist (check if > 0 to distinguish from unset)
+        let recentDays = defaults.integer(forKey: recentDaysKey)
+        if recentDays > 0 {
+            config.recentDays = recentDays
+        }
+
+        let frequentDays = defaults.integer(forKey: frequentDaysKey)
+        if frequentDays > 0 {
+            config.frequentDays = frequentDays
+        }
+
+        let cacheSeconds = defaults.integer(forKey: cacheSecondsKey)
+        if cacheSeconds > 0 {
+            config.cacheSeconds = cacheSeconds
+        }
+
+        let queryTimeout = defaults.integer(forKey: queryTimeoutSecondsKey)
+        if queryTimeout > 0 {
+            config.queryTimeoutSeconds = queryTimeout
+        }
+
+        // Load boolean if it exists
+        if defaults.object(forKey: searchOnlyUserHomeKey) != nil {
+            config.searchOnlyUserHome = defaults.bool(forKey: searchOnlyUserHomeKey)
+        }
+
         return config
     }
 
-    /// Save configuration to disk
+    /// Save configuration to UserDefaults
     func save() throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(self)
-        try data.write(to: Self.configFile)
+        let defaults = UserDefaults.standard
+
+        defaults.set(excludedFolders, forKey: Self.excludedFoldersKey)
+        defaults.set(excludedExtensions, forKey: Self.excludedExtensionsKey)
+        defaults.set(recentDays, forKey: Self.recentDaysKey)
+        defaults.set(frequentDays, forKey: Self.frequentDaysKey)
+        defaults.set(searchOnlyUserHome, forKey: Self.searchOnlyUserHomeKey)
+        defaults.set(cacheSeconds, forKey: Self.cacheSecondsKey)
+        defaults.set(queryTimeoutSeconds, forKey: Self.queryTimeoutSecondsKey)
+    }
+
+    /// Reset configuration to defaults
+    static func reset() {
+        let defaults = UserDefaults.standard
+
+        defaults.removeObject(forKey: excludedFoldersKey)
+        defaults.removeObject(forKey: excludedExtensionsKey)
+        defaults.removeObject(forKey: recentDaysKey)
+        defaults.removeObject(forKey: frequentDaysKey)
+        defaults.removeObject(forKey: searchOnlyUserHomeKey)
+        defaults.removeObject(forKey: cacheSecondsKey)
+        defaults.removeObject(forKey: queryTimeoutSecondsKey)
     }
 
     // MARK: - Filtering Helpers
@@ -98,11 +145,6 @@ struct SpotlightConfig: Codable {
     /// Check if a file path should be excluded based on excluded folders
     func isPathExcluded(_ path: String) -> Bool {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-
-        // IMPORTANT: Allow iCloud Drive files
-        if path.contains("/Library/Mobile Documents/com~apple~CloudDocs/") {
-            return false
-        }
 
         // Get relative path
         var relativePath = path
@@ -117,12 +159,18 @@ struct SpotlightConfig: Codable {
 
         // Check against excluded folders
         for excluded in excludedFolders {
-            // Check if path starts with excluded folder
-            if relativePath.hasPrefix(excluded + "/") || relativePath == excluded {
+            // Check if path equals excluded folder
+            if relativePath == excluded {
                 return true
             }
-            // Check if excluded folder is in the middle of the path
-            if relativePath.contains("/" + excluded + "/") {
+
+            // Check if path starts with excluded folder (e.g., "__pycache__/something")
+            if relativePath.hasPrefix(excluded + "/") {
+                return true
+            }
+
+            // Check if excluded folder is anywhere in the path (e.g., "Desktop/__pycache__" or "Desktop/__pycache__/file")
+            if relativePath.contains("/" + excluded + "/") || relativePath.hasSuffix("/" + excluded) {
                 return true
             }
         }

@@ -9,9 +9,29 @@ import Foundation
 
 @MainActor
 class FileSystemService {
-    private let spotlight: SpotlightManager
+    private var spotlight: SpotlightManager
 
     init() {
+        let config = SpotlightConfig.load()
+        self.spotlight = SpotlightManager(config: config)
+
+        // Listen for config changes
+        NotificationCenter.default.addObserver(
+            forName: .spotlightConfigChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.reloadConfig()
+            }
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    private func reloadConfig() {
         let config = SpotlightConfig.load()
         self.spotlight = SpotlightManager(config: config)
     }

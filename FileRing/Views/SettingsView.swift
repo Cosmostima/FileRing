@@ -17,6 +17,11 @@ struct SettingsView: View {
     @State private var authorizedFolders: [String] = BookmarkManager.shared.bookmarkKeys()
     @State private var showResetAlert = false
 
+    // Spotlight filter configuration
+    @State private var spotlightConfig = SpotlightConfig.load()
+    @State private var showFolderFilterEditor = false
+    @State private var showExtensionFilterEditor = false
+
     var body: some View {
         VStack(spacing: 20) {
 
@@ -33,6 +38,7 @@ struct SettingsView: View {
                 hotkeySection
                 displaySection
                 folderPermissionSection
+                filterSettingsSection
                 appBehaviorSection
                 aboutSection
                 resetSection
@@ -49,6 +55,28 @@ struct SettingsView: View {
             }
         } message: {
             Text("This will delete all folder authorizations and show the onboarding screen again. This action cannot be undone.")
+        }
+        .sheet(isPresented: $showFolderFilterEditor) {
+            FilterListEditorView(
+                title: "Excluded Folders",
+                placeholder: "e.g., node_modules, .git",
+                itemPrefix: "",
+                items: $spotlightConfig.excludedFolders
+            )
+            .onDisappear {
+                saveSpotlightConfig()
+            }
+        }
+        .sheet(isPresented: $showExtensionFilterEditor) {
+            FilterListEditorView(
+                title: "Excluded Extensions",
+                placeholder: "e.g., tmp, log, cache",
+                itemPrefix: ".",
+                items: $spotlightConfig.excludedExtensions
+            )
+            .onDisappear {
+                saveSpotlightConfig()
+            }
         }
     }
 
@@ -95,6 +123,48 @@ struct SettingsView: View {
             Text("Default: 6, Maximum: 10")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var filterSettingsSection: some View {
+        Section("Filter Settings") {
+            Text("Exclude specific folders and file extensions from search results.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // Excluded Folders
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Excluded Folders")
+                        .font(.body)
+                    Text("\(spotlightConfig.excludedFolders.count) folders excluded")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Manage") {
+                    showFolderFilterEditor = true
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.vertical, 4)
+
+            // Excluded Extensions
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Excluded Extensions")
+                        .font(.body)
+                    Text("\(spotlightConfig.excludedExtensions.count) extensions excluded")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Manage") {
+                    showExtensionFilterEditor = true
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.vertical, 4)
         }
     }
 
@@ -192,8 +262,34 @@ struct SettingsView: View {
             BookmarkManager.shared.revokeAuthorization(forKey: key)
         }
         UserDefaults.standard.removeObject(forKey: "FileRingHasSeenOnboarding")
+
+        // Reset spotlight config to defaults
+        resetSpotlightConfig()
+
         refreshAuthorizedFolders()
         NotificationCenter.default.post(name: Notification.Name("ShowOnboarding"), object: nil)
+    }
+
+    // MARK: - Spotlight Config Management
+    private func saveSpotlightConfig() {
+        do {
+            try spotlightConfig.save()
+            // Notify that config has changed so FileSystemService reloads it
+            NotificationCenter.default.post(name: .spotlightConfigChanged, object: nil)
+        } catch {
+            print("Failed to save spotlight config: \(error)")
+        }
+    }
+
+    private func resetSpotlightConfig() {
+        // Reset UserDefaults to restore defaults
+        SpotlightConfig.reset()
+
+        // Reload default config
+        spotlightConfig = SpotlightConfig.load()
+
+        // Notify that config has changed
+        NotificationCenter.default.post(name: .spotlightConfigChanged, object: nil)
     }
 
     // MARK: - Helpers

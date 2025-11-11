@@ -213,6 +213,13 @@ You must combine one or more modifier keys with a regular key:
 - **Items per Section**: Adjust from 4 to 10 items (default: 6)
 - **Hide Dock Icon**: Enable to make FileRing menubar-only (requires restart)
 
+**Settings → Filter Settings**
+
+- **Excluded Folders**: Manage folders to exclude from search results (e.g., `node_modules`, `__pycache__`)
+- **Excluded Extensions**: Manage file extensions to exclude (e.g., `.tmp`, `.log`, `.cache`)
+
+Click "Manage" to add or remove items. Changes take effect immediately.
+
 **Settings → Reset**
 
 - **Reset**: Delete all folder authorizations and show the onboarding screen again
