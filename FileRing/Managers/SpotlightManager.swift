@@ -89,7 +89,6 @@ class SpotlightManager: NSObject {
 
             // Set search scope
             if config.searchOnlyUserHome {
-                // Use user home scope which includes ~/Library/Mobile Documents (iCloud Drive)
                 query.searchScopes = [NSMetadataQueryUserHomeScope]
             } else {
                 query.searchScopes = [NSMetadataQueryLocalComputerScope]

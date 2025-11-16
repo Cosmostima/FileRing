@@ -22,6 +22,12 @@ struct SettingsView: View {
     @State private var showFolderFilterEditor = false
     @State private var showExtensionFilterEditor = false
 
+    // Launch at login
+    @State private var launchAtLoginManager = LaunchAtLoginManager()
+    @State private var launchAtLogin = false
+    @State private var showLaunchError = false
+    @State private var launchErrorMessage = ""
+
     var body: some View {
         VStack(spacing: 20) {
 
@@ -48,6 +54,10 @@ struct SettingsView: View {
             Divider()
         }
         .frame(minWidth: 400, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
+        .onAppear {
+            // Sync launch at login state from system
+            launchAtLogin = launchAtLoginManager.isLaunchAtLoginEnabled
+        }
         .alert("Reset FileRing?", isPresented: $showResetAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset", role: .destructive) {
@@ -55,6 +65,11 @@ struct SettingsView: View {
             }
         } message: {
             Text("This will delete all folder authorizations and show the onboarding screen again. This action cannot be undone.")
+        }
+        .alert("Launch at Login Error", isPresented: $showLaunchError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(launchErrorMessage)
         }
         .sheet(isPresented: $showFolderFilterEditor) {
             FilterListEditorView(
@@ -170,6 +185,24 @@ struct SettingsView: View {
 
     private var appBehaviorSection: some View {
         Section("App Behavior") {
+            Toggle("Launch at Startup", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { newValue in
+                    do {
+                        try launchAtLoginManager.setLaunchAtLogin(enabled: newValue)
+                        // Update state to reflect actual system state
+                        launchAtLogin = launchAtLoginManager.isLaunchAtLoginEnabled
+                    } catch {
+                        // Revert toggle on error
+                        launchAtLogin = launchAtLoginManager.isLaunchAtLoginEnabled
+                        launchErrorMessage = "Failed to update launch at login: \(error.localizedDescription)"
+                        showLaunchError = true
+                    }
+                }
+
+            Text("Launch FileRing automatically when you log in to your Mac.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Toggle("Hide Dock icon", isOn: $hideDockIcon)
                 .onChange(of: hideDockIcon) { newValue in
                     UserDefaults.standard.set(newValue, forKey: "FileRingHideDockIcon")

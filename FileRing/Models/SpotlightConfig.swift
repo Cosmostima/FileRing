@@ -12,7 +12,6 @@ struct SpotlightConfig: Codable {
 
     /// Folders to exclude from search results (relative to home directory)
     var excludedFolders: [String] = [
-        "Library",  // Exclude entire Library folder
         ".Trash",
         "node_modules",
         ".git",

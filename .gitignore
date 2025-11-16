@@ -21,10 +21,11 @@ project.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.log
 
 # macOS
 .DS_Store
-.AppleDouble
+.AppleDoubles
 .LSOverride
 ._*
 
