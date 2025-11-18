@@ -204,25 +204,28 @@ private struct DoubleRingItemRow: View {
     private var actionButtons: some View {
         if isHovered {
             HStack(spacing: 10) {
-                // Show copy file button only for files, not folders
-                if !item.isFolder {
+                // For applications, show no action buttons (only open on click)
+                // For files, show copy file button
+                // For folders, show copy path button only
+                if !item.isApplication {
+                    if !item.isFolder {
+                        CircularActionButton(
+                            icon: "doc.on.doc",
+                            tint: tint,
+                            onHover: { hovering in
+                                onHoverChange(.copyFile(path: item.path), hovering)
+                            }
+                        )
+                    }
+
                     CircularActionButton(
-                        icon: "doc.on.doc",
+                        icon: "link",
                         tint: tint,
                         onHover: { hovering in
-                            onHoverChange(.copyFile(path: item.path), hovering)
+                            onHoverChange(.copyPath(path: item.path), hovering)
                         }
                     )
                 }
-
-                // Show copy path button for both files and folders
-                CircularActionButton(
-                    icon: "link",
-                    tint: tint,
-                    onHover: { hovering in
-                        onHoverChange(.copyPath(path: item.path), hovering)
-                    }
-                )
             }
             .transition(.asymmetric(
                 insertion: .scale.combined(with: .opacity),

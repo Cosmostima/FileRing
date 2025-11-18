@@ -137,92 +137,89 @@ struct OnboardingView: View {
 
     // MARK: - Setup Page
     private var setupPage: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Hotkey Settings
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "keyboard.fill")
-                                .font(.system(size: 24))
-                                .foregroundStyle(.green)
-                            Text("Hotkey Settings")
-                                .font(.system(size: 20, weight: .semibold))
-                        }
-
-                        Text("Click the field and press your desired shortcut. Must combine modifier keys with a regular key (e.g., ⌃X, ⌥Space).")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-
-                        HotkeyCaptureField(
-                            modifierSetting: $selectedModifier,
-                            keySetting: $selectedKey
-                        ) { newModifier, newKey in
-                            let defaults = UserDefaults.standard
-                            defaults.set(newModifier, forKey: "FileRingModifierKey")
-                            defaults.set(newKey, forKey: "FileRingKeyEquivalent")
-
-                            // Auto-detect mode based on whether key is provided
-                            let newMode = newKey.isEmpty ? "modifier_only" : "combination"
-                            defaults.set(newMode, forKey: "FileRingHotkeyMode")
-
-                            NotificationCenter.default.post(name: .hotkeySettingChanged, object: nil)
-                        }
-                        .frame(height: 32)
-                        .padding(.vertical, 4)
+        ScrollView {
+            VStack(spacing: 24) {
+                // Hotkey Settings
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "keyboard.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.green)
+                        Text("Hotkey Settings")
+                            .font(.system(size: 20, weight: .semibold))
                     }
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
 
-                    Divider()
+                    Text("Click the field and press your desired shortcut. Must combine modifier keys with a regular key (e.g., ⌃X, ⌥Space).")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
 
-                    // Folder Authorization
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "folder.badge.plus")
-                                .font(.system(size: 24))
-                                .foregroundStyle(.orange)
-                            Text("Authorize Folders")
-                                .font(.system(size: 20, weight: .semibold))
-                        }
+                    HotkeyCaptureField(
+                        modifierSetting: $selectedModifier,
+                        keySetting: $selectedKey
+                    ) { newModifier, newKey in
+                        let defaults = UserDefaults.standard
+                        defaults.set(newModifier, forKey: "FileRingModifierKey")
+                        defaults.set(newKey, forKey: "FileRingKeyEquivalent")
 
-                        Text("Grant access to folders you want FileRing to search. This is required for FileRing to work.")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
+                        // Auto-detect mode based on whether key is provided
+                        let newMode = newKey.isEmpty ? "modifier_only" : "combination"
+                        defaults.set(newMode, forKey: "FileRingHotkeyMode")
 
-                        // Common folders
-                        VStack(spacing: 8) {
-                            folderPermissionRow(title: "iCloud Drive", icon: "icloud.fill", key: "iCloudDrive", folder: nil)
-                            folderPermissionRow(title: "Desktop", icon: "macwindow", key: "Desktop", folder: .desktopDirectory)
-                            folderPermissionRow(title: "Downloads", icon: "arrow.down.circle.fill", key: "Downloads", folder: .downloadsDirectory)
-                            folderPermissionRow(title: "Documents", icon: "doc.fill", key: "Documents", folder: .documentDirectory)
-                            folderPermissionRow(title: "Applications", icon: "app.fill", key: "Applications", folder: .applicationDirectory)
-                        }
-
-                        // Custom folder button
-                        Button(action: addCustomFolder) {
-                            HStack {
-                                Image(systemName: "plus.circle.fill")
-                                Text("Add Custom Folder")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .padding(.top, 8)
-
-                        // Authorized count
-                        Text("\(authorizedFolders.count) folder(s) authorized")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
+                        NotificationCenter.default.post(name: .hotkeySettingChanged, object: nil)
                     }
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
+                    .frame(height: 32)
+                    .padding(.vertical, 4)
                 }
                 .padding()
-                .frame(minHeight: geometry.size.height)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(12)
+
+                Divider()
+
+                // Folder Authorization
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.orange)
+                        Text("Authorize Folders")
+                            .font(.system(size: 20, weight: .semibold))
+                    }
+
+                    Text("Grant access to folders you want FileRing to search. This is required for FileRing to work.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+
+                    // Common folders
+                    VStack(spacing: 8) {
+                        folderPermissionRow(title: "iCloud Drive", icon: "icloud.fill", key: "iCloudDrive", folder: nil)
+                        folderPermissionRow(title: "Desktop", icon: "macwindow", key: "Desktop", folder: .desktopDirectory)
+                        folderPermissionRow(title: "Downloads", icon: "arrow.down.circle.fill", key: "Downloads", folder: .downloadsDirectory)
+                        folderPermissionRow(title: "Documents", icon: "doc.fill", key: "Documents", folder: .documentDirectory)
+                    }
+
+                    // Custom folder button
+                    Button(action: addCustomFolder) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add Custom Folder")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 8)
+
+                    // Authorized count
+                    Text("\(authorizedFolders.count) folder(s) authorized")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(12)
             }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
     }
 

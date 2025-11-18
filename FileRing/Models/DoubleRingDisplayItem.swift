@@ -12,6 +12,7 @@ struct DoubleRingDisplayItem: Identifiable {
     let name: String
     let path: String
     let isFolder: Bool
+    let isApplication: Bool
     let parentPath: String  // Two-level parent path like "Documents / Projects"
     let lastModified: String?  // ISO 8601 timestamp
 }

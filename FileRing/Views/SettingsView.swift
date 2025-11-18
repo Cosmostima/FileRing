@@ -180,6 +180,16 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
             }
             .padding(.vertical, 4)
+            
+            // Application Search
+            Toggle("Include Applications in Search", isOn: $spotlightConfig.enableAppSearch)
+                .onChange(of: spotlightConfig.enableAppSearch) { _ in
+                    saveSpotlightConfig()
+                }
+
+            Text("When enabled, applications will be mixed with files in \"Recently Used\" and \"Most Used\" sections. At least 50% of results will always be files.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -232,7 +242,6 @@ struct SettingsView: View {
                 folderPermissionRow(title: "Desktop", icon: "macwindow", key: "Desktop", folder: .desktopDirectory)
                 folderPermissionRow(title: "Downloads", icon: "arrow.down.circle.fill", key: "Downloads", folder: .downloadsDirectory)
                 folderPermissionRow(title: "Documents", icon: "doc.fill", key: "Documents", folder: .documentDirectory)
-                folderPermissionRow(title: "Applications", icon: "app.fill", key: "Applications", folder: .applicationDirectory)
             }
 
             // Authorized folders list

@@ -49,6 +49,17 @@ struct SpotlightConfig: Codable {
     /// If true, only search within user's home directory
     var searchOnlyUserHome: Bool = true
 
+    // MARK: - Application Search
+
+    /// If true, include applications in search results
+    var enableAppSearch: Bool = false
+
+    /// If true, exclude system applications from search results
+    var excludeSystemApps: Bool = false
+
+    /// Multiplier for application use count when mixing with files (default 0.5)
+    var appFrequencyMultiplier: Double = 0.5
+
     // MARK: - Performance
 
     /// Cache duration in seconds
@@ -64,6 +75,9 @@ struct SpotlightConfig: Codable {
     private static let recentDaysKey = "FileRingRecentDays"
     private static let frequentDaysKey = "FileRingFrequentDays"
     private static let searchOnlyUserHomeKey = "FileRingSearchOnlyUserHome"
+    private static let enableAppSearchKey = "FileRingEnableAppSearch"
+    private static let excludeSystemAppsKey = "FileRingExcludeSystemApps"
+    private static let appFrequencyMultiplierKey = "FileRingAppFrequencyMultiplier"
     private static let cacheSecondsKey = "FileRingCacheSeconds"
     private static let queryTimeoutSecondsKey = "FileRingQueryTimeoutSeconds"
 
@@ -105,9 +119,22 @@ struct SpotlightConfig: Codable {
             config.queryTimeoutSeconds = queryTimeout
         }
 
-        // Load boolean if it exists
+        // Load booleans if they exist
         if defaults.object(forKey: searchOnlyUserHomeKey) != nil {
             config.searchOnlyUserHome = defaults.bool(forKey: searchOnlyUserHomeKey)
+        }
+
+        if defaults.object(forKey: enableAppSearchKey) != nil {
+            config.enableAppSearch = defaults.bool(forKey: enableAppSearchKey)
+        }
+
+        if defaults.object(forKey: excludeSystemAppsKey) != nil {
+            config.excludeSystemApps = defaults.bool(forKey: excludeSystemAppsKey)
+        }
+
+        // Load double if it exists
+        if defaults.object(forKey: appFrequencyMultiplierKey) != nil {
+            config.appFrequencyMultiplier = defaults.double(forKey: appFrequencyMultiplierKey)
         }
 
         return config
@@ -122,6 +149,9 @@ struct SpotlightConfig: Codable {
         defaults.set(recentDays, forKey: Self.recentDaysKey)
         defaults.set(frequentDays, forKey: Self.frequentDaysKey)
         defaults.set(searchOnlyUserHome, forKey: Self.searchOnlyUserHomeKey)
+        defaults.set(enableAppSearch, forKey: Self.enableAppSearchKey)
+        defaults.set(excludeSystemApps, forKey: Self.excludeSystemAppsKey)
+        defaults.set(appFrequencyMultiplier, forKey: Self.appFrequencyMultiplierKey)
         defaults.set(cacheSeconds, forKey: Self.cacheSecondsKey)
         defaults.set(queryTimeoutSeconds, forKey: Self.queryTimeoutSecondsKey)
     }
@@ -135,6 +165,9 @@ struct SpotlightConfig: Codable {
         defaults.removeObject(forKey: recentDaysKey)
         defaults.removeObject(forKey: frequentDaysKey)
         defaults.removeObject(forKey: searchOnlyUserHomeKey)
+        defaults.removeObject(forKey: enableAppSearchKey)
+        defaults.removeObject(forKey: excludeSystemAppsKey)
+        defaults.removeObject(forKey: appFrequencyMultiplierKey)
         defaults.removeObject(forKey: cacheSecondsKey)
         defaults.removeObject(forKey: queryTimeoutSecondsKey)
     }
@@ -144,6 +177,11 @@ struct SpotlightConfig: Codable {
     /// Check if a file path should be excluded based on excluded folders
     func isPathExcluded(_ path: String) -> Bool {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        return isPathExcluded(path, homeDir: homeDir)
+    }
+
+    /// Check if a file path should be excluded (nonisolated version with explicit homeDir)
+    nonisolated func isPathExcluded(_ path: String, homeDir: String) -> Bool {
 
         // Get relative path
         var relativePath = path

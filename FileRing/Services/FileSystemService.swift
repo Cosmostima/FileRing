@@ -10,10 +10,14 @@ import Foundation
 @MainActor
 class FileSystemService {
     private var spotlight: SpotlightManager
+    private var appSearchService: AppSearchService
+    private var config: SpotlightConfig
 
     init() {
         let config = SpotlightConfig.load()
+        self.config = config
         self.spotlight = SpotlightManager(config: config)
+        self.appSearchService = AppSearchService(config: config, spotlightManager: self.spotlight)
 
         // Listen for config changes
         NotificationCenter.default.addObserver(
@@ -33,20 +37,35 @@ class FileSystemService {
 
     private func reloadConfig() {
         let config = SpotlightConfig.load()
+        self.config = config
         self.spotlight = SpotlightManager(config: config)
+        self.appSearchService = AppSearchService(config: config, spotlightManager: self.spotlight)
     }
 
     // MARK: - File Operations
     func fetchRecentlyOpenedFiles(limit: Int = 10) async throws -> [FileItem] {
-        return try await spotlight.queryRecentlyOpenedFiles(limit: limit)
+        // If app search is disabled, return files only (zero overhead)
+        guard config.enableAppSearch else {
+            return try await spotlight.queryRecentlyOpenedFiles(limit: limit)
+        }
+
+        // Mix apps and files, guaranteeing at least 50% files
+        return try await appSearchService.fetchRecentItemsWithApps(totalLimit: limit)
     }
 
     func fetchRecentlySavedFiles(limit: Int = 10) async throws -> [FileItem] {
+        // Recently saved only applies to files, not apps
         return try await spotlight.queryRecentlySavedFiles(limit: limit)
     }
 
     func fetchFrequentlyOpenedFiles(limit: Int = 10) async throws -> [FileItem] {
-        return try await spotlight.queryFrequentlyOpenedFiles(limit: limit)
+        // If app search is disabled, return files only (zero overhead)
+        guard config.enableAppSearch else {
+            return try await spotlight.queryFrequentlyOpenedFiles(limit: limit)
+        }
+
+        // Mix apps and files with adjusted app frequency (0.5x), guaranteeing at least 50% files
+        return try await appSearchService.fetchFrequentItemsWithApps(totalLimit: limit)
     }
 
     // MARK: - Folder Operations

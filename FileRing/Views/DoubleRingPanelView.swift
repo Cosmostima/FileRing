@@ -267,6 +267,7 @@ private extension DoubleRingPanelView {
                     name: $0.displayName,
                     path: $0.path,
                     isFolder: false,
+                    isApplication: $0.itemType == .application,
                     parentPath: twoLevelParentPath(for: $0.path),
                     lastModified: $0.timestamp
                 )
@@ -278,6 +279,7 @@ private extension DoubleRingPanelView {
                     name: $0.displayName,
                     path: $0.path,
                     isFolder: true,
+                    isApplication: false,
                     parentPath: twoLevelParentPath(for: $0.path),
                     lastModified: $0.timestamp
                 )

@@ -14,6 +14,9 @@ class SpotlightManager: NSObject {
     private var continuation: CheckedContinuation<[NSMetadataItem], Error>?
     private var timeoutTask: Task<Void, Never>?
 
+    // Query serialization to prevent continuation overwrites
+    private var isQueryRunning = false
+
     private let config: SpotlightConfig
 
     init(config: SpotlightConfig) {
@@ -81,6 +84,13 @@ class SpotlightManager: NSObject {
         sortBy: String,
         ascending: Bool
     ) async throws -> [NSMetadataItem] {
+        // Wait for any existing query to complete (reduce delay to 10ms for lower latency)
+        while isQueryRunning {
+            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+
+        isQueryRunning = true
+
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
 
@@ -167,6 +177,7 @@ class SpotlightManager: NSObject {
 
         continuation?.resume(returning: items)
         continuation = nil
+        isQueryRunning = false
     }
 
     private func handleTimeout() {
@@ -182,6 +193,7 @@ class SpotlightManager: NSObject {
 
         continuation?.resume(throwing: SpotlightError.timeout)
         continuation = nil
+        isQueryRunning = false
     }
 
     // MARK: - Result Parsing
@@ -231,13 +243,18 @@ class SpotlightManager: NSObject {
 
             let lastUsed = (item.value(forAttribute: "kMDItemLastUsedDate") as? Date).map(formatDate)
             let lastModified = (item.value(forAttribute: "kMDItemFSContentChangeDate") as? Date).map(formatDate)
+            let useCount = item.value(forAttribute: "kMDItemUseCount") as? Int
 
             results.append(FileSystemItem(
                 path: path,
                 name: displayName,
                 lastUsed: lastUsed,
                 lastModified: lastModified,
-                contentType: contentType
+                contentType: contentType,
+                itemType: isFolder ? .folder : .file,
+                bundleIdentifier: nil,
+                version: nil,
+                useCount: useCount
             ))
 
             if results.count >= limit {
@@ -261,10 +278,19 @@ class SpotlightManager: NSObject {
     func openFile(at path: String) throws {
         let url = URL(fileURLWithPath: path)
 
+        // Check if this is an application bundle
+        let isApp = path.hasSuffix(".app") || url.pathExtension == "app"
+
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
 
-        NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
+        if isApp {
+            // For applications, use openApplication to launch them
+            NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
+        } else {
+            // For regular files and folders, use open
+            NSWorkspace.shared.open(url, configuration: configuration) { _, _ in }
+        }
     }
 
     func copyToClipboard(path: String, mode: ClipboardMode) throws {

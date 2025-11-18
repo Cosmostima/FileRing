@@ -211,7 +211,6 @@ You must combine one or more modifier keys with a regular key:
 **Settings → Display**
 
 - **Items per Section**: Adjust from 4 to 10 items (default: 6)
-- **Hide Dock Icon**: Enable to make FileRing menubar-only (requires restart)
 
 **Settings → Filter Settings**
 
@@ -219,6 +218,15 @@ You must combine one or more modifier keys with a regular key:
 - **Excluded Extensions**: Manage file extensions to exclude (e.g., `.tmp`, `.log`, `.cache`)
 
 Click "Manage" to add or remove items. Changes take effect immediately.
+
+- **Include Applications in Search**: Display your app as a file in the "Recently Used" and "Most Used" sections. Files will always make up at least 50% of the results, and app usage counts are weighted at 0.5× to keep files prioritized.
+
+
+
+**Settings → App Behavior**
+
+- **Launch at Startup**: Automatically start FileRing when you log in to your Mac
+- **Hide Dock Icon**: Make FileRing menubar-only (requires restart)
 
 **Settings → Reset**
 
