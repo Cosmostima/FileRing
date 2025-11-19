@@ -13,6 +13,9 @@ struct DoubleRingPanelView: View {
     @State private var hoverState = HoverState()
     @State private var hoveredSection: PanelSection?
     @State private var lastHoveredPath: String?
+    @State private var ringOpacity: Double = 0
+    @State private var ringScale: CGFloat = 0.9
+    @State private var hasTriggeredInitialRefresh = false
 
     private enum Layout {
         static let panelSize: CGFloat = 900
@@ -41,12 +44,20 @@ struct DoubleRingPanelView: View {
     var body: some View {
         content
             .frame(width: Layout.panelSize, height: Layout.panelSize)
-            .task { await viewModel.refresh() }
+            .onAppear {
+                guard !hasTriggeredInitialRefresh else { return }
+                hasTriggeredInitialRefresh = true
+                DispatchQueue.main.async {
+                    Task { await refreshWithEntranceAnimation() }
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .triggerHoveredItem)) { _ in
                 performCurrentHoverAction()
             }
             .onReceive(NotificationCenter.default.publisher(for: .refreshPanel)) { _ in
-                Task { await viewModel.refresh() }
+                DispatchQueue.main.async {
+                    Task { await refreshWithEntranceAnimation() }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .hidePanel)) { _ in
                 hoverState.clear()
@@ -61,27 +72,19 @@ struct DoubleRingPanelView: View {
 private extension DoubleRingPanelView {
     @ViewBuilder
     var content: some View {
-        if viewModel.isInitialLoading {
-            loadingState
-        } else if let error = viewModel.error {
-            errorState(message: error)
-        } else {
-            ZStack {
-                ringLayout
-                if viewModel.isLoadingSection {
-                    if #available(macOS 26.0, *) {
-                        ProgressView()
-                            .controlSize(.large)
-                            .padding(10)
-                            .glassEffect()
-                    } else {
-                        ProgressView()
-                            .controlSize(.large)
-                            .padding(10)
-                            .background(.ultraThinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                }
+        ZStack {
+            ringLayout
+
+            if viewModel.isInitialLoading {
+                loadingState
+            }
+
+            if let error = viewModel.error {
+                errorState(message: error)
+            }
+
+            if viewModel.isLoadingSection && !viewModel.isInitialLoading {
+                inlineLoadingIndicator
             }
         }
     }
@@ -100,6 +103,24 @@ private extension DoubleRingPanelView {
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
         }
+    }
+
+    var inlineLoadingIndicator: some View {
+        Group {
+            if #available(macOS 26.0, *) {
+                ProgressView()
+                    .controlSize(.large)
+                    .padding(10)
+                    .glassEffect()
+            } else {
+                ProgressView()
+                    .controlSize(.large)
+                    .padding(10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .transition(.opacity)
     }
 
     func errorState(message: String) -> some View {
@@ -128,17 +149,21 @@ private extension DoubleRingPanelView {
                     innerRadius: Layout.sectionVisualInnerRadius,
                     outerRadius: Layout.sectionVisualOuterRadius
                 )
+                .opacity(ringOpacity)
+                .scaleEffect(ringScale, anchor: .center)
 
-                DoubleRingItemsListView(
-                    items: displayItems,
-                    layout: Layout.itemList,
-                    side: viewModel.selectedSection.side,
-                    center: center,
-                    radius: Layout.sectionVisualOuterRadius,
-                    tint: viewModel.selectedSection.baseColor,
-                    hoveredPath: hoverState.openFilePath ?? hoverState.copyFilePath,
-                    onHoverChange: handleHoverChange
-                )
+                if !viewModel.isInitialLoading {
+                    DoubleRingItemsListView(
+                        items: displayItems,
+                        layout: Layout.itemList,
+                        side: viewModel.selectedSection.side,
+                        center: center,
+                        radius: Layout.sectionVisualOuterRadius,
+                        tint: viewModel.selectedSection.baseColor,
+                        hoveredPath: hoverState.openFilePath ?? hoverState.copyFilePath,
+                        onHoverChange: handleHoverChange
+                    )
+                }
             }
             .contentShape(Rectangle())
             .onContinuousHover { phase in
@@ -166,6 +191,21 @@ extension DoubleRingPanelView {
 
 // MARK: - Hover handling
 private extension DoubleRingPanelView {
+    @MainActor
+    func refreshWithEntranceAnimation() async {
+        triggerRingEntranceAnimation()
+        await viewModel.refresh()
+    }
+
+    func triggerRingEntranceAnimation() {
+        ringOpacity = 0
+        ringScale = 0.9
+        withAnimation(.easeOut(duration: 0.05)) {
+            ringOpacity = 1
+            ringScale = 1
+        }
+    }
+
     func updateSectionHover(at location: CGPoint, center: CGPoint) {
         let dx = location.x - center.x
         let dy = location.y - center.y

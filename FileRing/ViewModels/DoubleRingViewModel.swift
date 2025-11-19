@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import os.log
 
 @MainActor
 final class DoubleRingViewModel: ObservableObject {
@@ -21,6 +22,7 @@ final class DoubleRingViewModel: ObservableObject {
     private var cachedFiles: [PanelSection: [FileItem]] = [:]
     private var cachedFolders: [PanelSection: [FolderItem]] = [:]
     private var preloadTask: Task<Void, Never>?
+    private var loadingSections = Set<PanelSection>()
 
     init(fileSystemService: FileSystemService? = nil) {
         self.fileSystemService = fileSystemService ?? FileSystemService()
@@ -36,6 +38,10 @@ final class DoubleRingViewModel: ObservableObject {
     }
 
     func refresh() async {
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "TotalLoadAndPreload", signpostID: signpostID)
+        defer { os_signpost(.end, log: .pointsOfInterest, name: "TotalLoadAndPreload", signpostID: signpostID) }
+
         startNewSession()
         await loadInitialSection()
         await preloadRemainingSections()
@@ -48,6 +54,9 @@ final class DoubleRingViewModel: ObservableObject {
         if applyCachedData(for: section) {
             error = nil
             isLoadingSection = false
+        } else if loadingSections.contains(section) {
+            error = nil
+            isLoadingSection = true
         } else {
             Task { await load(section: section, updateUI: true) }
         }
@@ -76,6 +85,7 @@ private extension DoubleRingViewModel {
         cancelPreload()
         cachedFiles.removeAll()
         cachedFolders.removeAll()
+        loadingSections.removeAll()
         selectedSection = .fileRecentlySaved
         error = nil
         fileItems = []
@@ -91,12 +101,22 @@ private extension DoubleRingViewModel {
 
     func preloadRemainingSections() async {
         cancelPreload()
-        preloadTask = Task {
-            let sections = PanelSection.allCases.filter { $0 != selectedSection }
-            for section in sections {
-                if Task.isCancelled { return }
-                if cachedSnapshot(for: section) != nil { continue }
-                await load(section: section, updateUI: false)
+
+        let sections = PanelSection.allCases
+        guard !sections.isEmpty else { return }
+
+        preloadTask = Task { [weak self] in
+            guard let self = self else { return }
+            await withTaskGroup(of: Void.self) { group in
+                for section in sections {
+                    if section == self.selectedSection { continue }
+                    if self.cachedSnapshot(for: section) != nil { continue }
+                    group.addTask { [weak self] in
+                        guard let self = self else { return }
+                        if Task.isCancelled { return }
+                        await self.load(section: section, updateUI: false)
+                    }
+                }
             }
         }
     }
@@ -110,32 +130,39 @@ private extension DoubleRingViewModel {
 // MARK: - Loading Helpers
 private extension DoubleRingViewModel {
     func load(section: PanelSection, updateUI: Bool) async {
-        if updateUI {
+        if Task.isCancelled { return }
+
+        loadingSections.insert(section)
+        defer { loadingSections.remove(section) }
+
+        if updateUI || section == selectedSection {
             isLoadingSection = true
             error = nil
         }
 
         do {
-            let shouldUpdateUI = section == selectedSection
             switch section.contentType {
             case .files:
                 let items = try await fileSystemService.fetchFiles(for: section.category, limit: itemsLimit)
+                guard !Task.isCancelled else { return }
                 cachedFiles[section] = items
-                if shouldUpdateUI {
+                if section == selectedSection {
                     fileItems = items
                     folderItems = []
                     isLoadingSection = false
                 }
             case .folders:
                 let items = try await fileSystemService.fetchFolders(for: section.category, limit: itemsLimit)
+                guard !Task.isCancelled else { return }
                 cachedFolders[section] = items
-                if shouldUpdateUI {
+                if section == selectedSection {
                     folderItems = items
                     fileItems = []
                     isLoadingSection = false
                 }
             }
         } catch {
+            if error is CancellationError { return }
             if section == selectedSection {
                 self.error = error.localizedDescription
                 fileItems = []
@@ -144,7 +171,7 @@ private extension DoubleRingViewModel {
             }
         }
     }
-
+    
     func cachedSnapshot(for section: PanelSection) -> ([FileItem], [FolderItem])? {
         if let files = cachedFiles[section] {
             return (files, [])

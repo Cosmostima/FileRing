@@ -7,15 +7,26 @@
 
 import Foundation
 import AppKit
+import os.log
+
+private final class SpotlightQueryContext {
+    let query: NSMetadataQuery
+    let continuation: CheckedContinuation<[NSMetadataItem], Error>
+    var timeoutTask: Task<Void, Never>?
+
+    init(query: NSMetadataQuery, continuation: CheckedContinuation<[NSMetadataItem], Error>) {
+        self.query = query
+        self.continuation = continuation
+    }
+}
+
+private final class SpotlightCancellationToken: @unchecked Sendable {
+    var identifier: ObjectIdentifier?
+}
 
 @MainActor
 class SpotlightManager: NSObject {
-    private var currentQuery: NSMetadataQuery?
-    private var continuation: CheckedContinuation<[NSMetadataItem], Error>?
-    private var timeoutTask: Task<Void, Never>?
-
-    // Query serialization to prevent continuation overwrites
-    private var isQueryRunning = false
+    private var activeQueries: [ObjectIdentifier: SpotlightQueryContext] = [:]
 
     private let config: SpotlightConfig
 
@@ -26,16 +37,31 @@ class SpotlightManager: NSObject {
 
     // MARK: - File Queries
 
+    private func recentProgressiveWindows() -> [Int] {
+        let sameDayWindow = 1
+        let extended = max(sameDayWindow, config.recentDays)
+        if extended == sameDayWindow {
+            return [sameDayWindow]
+        }
+        return [sameDayWindow, extended]
+    }
+
     /// Query recently opened files - sorted by last used date (newest first)
     func queryRecentlyOpenedFiles(limit: Int) async throws -> [FileSystemItem] {
-        try await query(attribute: "kMDItemLastUsedDate", daysAgo: -config.recentDays,
-                       isFolder: false, sortBy: "kMDItemLastUsedDate", limit: limit)
+        try await query(attribute: "kMDItemLastUsedDate",
+                        dayWindows: recentProgressiveWindows(),
+                        isFolder: false,
+                        sortBy: "kMDItemLastUsedDate",
+                        limit: limit)
     }
 
     /// Query recently saved files - sorted by modification date (newest first)
     func queryRecentlySavedFiles(limit: Int) async throws -> [FileSystemItem] {
-        try await query(attribute: "kMDItemFSContentChangeDate", daysAgo: -config.recentDays,
-                       isFolder: false, sortBy: "kMDItemFSContentChangeDate", limit: limit)
+        try await query(attribute: "kMDItemFSContentChangeDate",
+                        dayWindows: recentProgressiveWindows(),
+                        isFolder: false,
+                        sortBy: "kMDItemFSContentChangeDate",
+                        limit: limit)
     }
 
     /// Query frequently opened files - sorted by use count (most used first)
@@ -48,14 +74,20 @@ class SpotlightManager: NSObject {
 
     /// Query recently opened folders - sorted by last used date (newest first)
     func queryRecentlyOpenedFolders(limit: Int) async throws -> [FileSystemItem] {
-        try await query(attribute: "kMDItemLastUsedDate", daysAgo: -config.recentDays,
-                       isFolder: true, sortBy: "kMDItemLastUsedDate", limit: limit)
+        try await query(attribute: "kMDItemLastUsedDate",
+                        dayWindows: recentProgressiveWindows(),
+                        isFolder: true,
+                        sortBy: "kMDItemLastUsedDate",
+                        limit: limit)
     }
 
     /// Query recently modified folders - sorted by modification date (newest first)
     func queryRecentlyModifiedFolders(limit: Int) async throws -> [FileSystemItem] {
-        try await query(attribute: "kMDItemFSContentChangeDate", daysAgo: -config.recentDays,
-                       isFolder: true, sortBy: "kMDItemFSContentChangeDate", limit: limit)
+        try await query(attribute: "kMDItemFSContentChangeDate",
+                        dayWindows: recentProgressiveWindows(),
+                        isFolder: true,
+                        sortBy: "kMDItemFSContentChangeDate",
+                        limit: limit)
     }
 
     /// Query frequently opened folders - sorted by use count (most used first)
@@ -68,13 +100,45 @@ class SpotlightManager: NSObject {
 
     /// Core query method - always sorts descending (newest/highest first)
     private func query(attribute: String, daysAgo: Int, isFolder: Bool, sortBy: String, limit: Int) async throws -> [FileSystemItem] {
-        // ascending: false = descending order (newest/most used first)
-        let items = try await performQuery(attribute: attribute, daysAgo: daysAgo,
-                                           isFolder: isFolder, sortBy: sortBy, ascending: false)
+        let window = max(1, abs(daysAgo))
+        return try await query(attribute: attribute,
+                               dayWindows: [window],
+                               isFolder: isFolder,
+                               sortBy: sortBy,
+                               limit: limit)
+    }
 
-        // Get authorized paths once for the entire batch
+    private func query(attribute: String, dayWindows: [Int], isFolder: Bool, sortBy: String, limit: Int) async throws -> [FileSystemItem] {
+        let uniqueWindows = dayWindows.reduce(into: [Int]()) { acc, value in
+            let normalized = max(1, value)
+            if !acc.contains(normalized) {
+                acc.append(normalized)
+            }
+        }
+
+        var results: [FileSystemItem] = []
+        var seenPaths = Set<String>()
         let authorizedPaths = BookmarkManager.shared.authorizedPaths()
-        return parseItems(from: items, limit: limit, isFolder: isFolder, authorizedPaths: authorizedPaths)
+
+        for days in uniqueWindows {
+            if results.count >= limit { break }
+
+            let remainingLimit = limit - results.count
+            let items = try await performQuery(attribute: attribute,
+                                               daysAgo: -days,
+                                               isFolder: isFolder,
+                                               sortBy: sortBy,
+                                               ascending: false)
+
+            let parsed = parseItems(from: items,
+                                    limit: remainingLimit,
+                                    isFolder: isFolder,
+                                    authorizedPaths: authorizedPaths,
+                                    seenPaths: &seenPaths)
+            results.append(contentsOf: parsed)
+        }
+
+        return results
     }
 
     private func performQuery(
@@ -84,83 +148,103 @@ class SpotlightManager: NSObject {
         sortBy: String,
         ascending: Bool
     ) async throws -> [NSMetadataItem] {
-        // Wait for any existing query to complete (reduce delay to 10ms for lower latency)
-        while isQueryRunning {
-            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
-        }
+        let cancellationToken = SpotlightCancellationToken()
 
-        isQueryRunning = true
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "SpotlightQuery", signpostID: signpostID, "Attribute: %{public}s, SortBy: %{public}s", attribute, sortBy)
 
-        return try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
+        let items = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let query = NSMetadataQuery()
+                let identifier = ObjectIdentifier(query)
 
-            let query = NSMetadataQuery()
-            self.currentQuery = query
+                let context = SpotlightQueryContext(query: query, continuation: continuation)
+                activeQueries[identifier] = context
+                cancellationToken.identifier = identifier
 
-            // Set search scope
-            if config.searchOnlyUserHome {
-                query.searchScopes = [NSMetadataQueryUserHomeScope]
-            } else {
-                query.searchScopes = [NSMetadataQueryLocalComputerScope]
-            }
+                // Set search scope
+                // Prefer user-authorized folders as the Spotlight scope to avoid scanning the whole home
+                let authorizedSearchPaths = BookmarkManager.shared.authorizedPaths()
+                if !authorizedSearchPaths.isEmpty {
+                    query.searchScopes = authorizedSearchPaths.map { URL(fileURLWithPath: $0) }
+                } else if config.searchOnlyUserHome {
+                    query.searchScopes = [NSMetadataQueryUserHomeScope]
+                } else {
+                    query.searchScopes = [NSMetadataQueryLocalComputerScope]
+                }
 
-            // Build predicate
-            let startDate = Calendar.current.date(byAdding: .day, value: daysAgo, to: Date())!
-            var predicates: [NSPredicate] = [
-                NSPredicate(format: "\(attribute) >= %@", startDate as NSDate)
-            ]
+                // Build predicate
+                let startDate = Calendar.current.date(byAdding: .day, value: daysAgo, to: Date())!
+                var predicates: [NSPredicate] = [
+                    NSPredicate(format: "\(attribute) >= %@", startDate as NSDate)
+                ]
 
-            // Filter by folder/file
-            if isFolder {
-                predicates.append(NSPredicate(format: "kMDItemContentType == %@", "public.folder"))
-            } else {
-                predicates.append(NSPredicate(format: "kMDItemContentTypeTree != %@", "public.folder"))
+                // Filter by folder/file
+                if isFolder {
+                    predicates.append(NSPredicate(format: "kMDItemContentType == %@", "public.folder"))
+                } else {
+                    predicates.append(NSPredicate(format: "kMDItemContentTypeTree != %@", "public.folder"))
 
-                // Exclude extensions via predicate (more efficient)
-                if !config.excludedExtensions.isEmpty {
-                    for ext in config.excludedExtensions {
-                        predicates.append(NSPredicate(format: "NOT kMDItemFSName ENDSWITH[cd] %@", ext))
+                    // Exclude extensions via predicate (more efficient)
+                    if !config.excludedExtensions.isEmpty {
+                        for ext in config.excludedExtensions {
+                            predicates.append(NSPredicate(format: "NOT kMDItemFSName ENDSWITH[cd] %@", ext))
+                        }
+                    }
+                }
+
+                query.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+
+                // Set sort descriptors
+                query.sortDescriptors = [NSSortDescriptor(key: sortBy, ascending: ascending)]
+
+                // Register notifications
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(queryDidFinishGathering),
+                    name: .NSMetadataQueryDidFinishGathering,
+                    object: query
+                )
+
+                // Start query
+                query.start()
+
+                // Setup timeout
+                let timeoutSeconds = config.queryTimeoutSeconds
+                context.timeoutTask = Task { [weak self, weak query] in
+                    guard let query = query else { return }
+                    guard let self = self else { return }
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
+                        if Task.isCancelled { return }
+                        await self.handleTimeout(for: query)
+                    } catch {
+                        // Task cancelled, no-op
                     }
                 }
             }
-
-            query.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-
-            // Set sort descriptors
-            query.sortDescriptors = [NSSortDescriptor(key: sortBy, ascending: ascending)]
-
-            // Register notifications
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(queryDidFinishGathering),
-                name: .NSMetadataQueryDidFinishGathering,
-                object: query
-            )
-
-            // Start query
-            query.start()
-
-            // Setup timeout
-            let timeoutSeconds = config.queryTimeoutSeconds
-            self.timeoutTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
-                    self?.handleTimeout()
-                } catch {
-                    // Task was cancelled, which is expected
-                }
+        } onCancel: {
+            Task { @MainActor in
+                guard let id = cancellationToken.identifier else { return }
+                self.cancelQuery(with: id, error: CancellationError())
             }
         }
+
+        os_signpost(.end, log: .pointsOfInterest, name: "SpotlightQuery", signpostID: signpostID, "Found %d raw items", items.count)
+        return items
     }
 
     @objc private func queryDidFinishGathering(_ notification: Notification) {
-        timeoutTask?.cancel()
-
         guard let query = notification.object as? NSMetadataQuery else {
-            continuation?.resume(throwing: SpotlightError.queryFailed("Invalid query object"))
-            continuation = nil
             return
         }
+
+        let identifier = ObjectIdentifier(query)
+        guard let context = activeQueries.removeValue(forKey: identifier) else {
+            return
+        }
+
+        context.timeoutTask?.cancel()
 
         query.disableUpdates()
 
@@ -172,28 +256,34 @@ class SpotlightManager: NSObject {
         }
 
         query.stop()
-        currentQuery = nil
         NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
 
-        continuation?.resume(returning: items)
-        continuation = nil
-        isQueryRunning = false
+        context.continuation.resume(returning: items)
     }
 
-    private func handleTimeout() {
-        guard let query = currentQuery else { return }
+    private func handleTimeout(for query: NSMetadataQuery) async {
+        cancelQuery(for: query, error: SpotlightError.timeout)
+    }
 
-        // Properly stop the query to free resources
+    private func cancelQuery(for query: NSMetadataQuery, error: Error) {
+        let identifier = ObjectIdentifier(query)
+        cancelQuery(with: identifier, error: error)
+    }
+
+    private func cancelQuery(with identifier: ObjectIdentifier, error: Error) {
+        guard let context = activeQueries.removeValue(forKey: identifier) else {
+            return
+        }
+
+        context.timeoutTask?.cancel()
+
+        let query = context.query
         query.disableUpdates()
         query.stop()
-        currentQuery = nil
 
-        // Remove observer to prevent memory leaks
         NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
 
-        continuation?.resume(throwing: SpotlightError.timeout)
-        continuation = nil
-        isQueryRunning = false
+        context.continuation.resume(throwing: error)
     }
 
     // MARK: - Result Parsing
@@ -213,7 +303,7 @@ class SpotlightManager: NSObject {
         return false
     }
 
-    private func parseItems(from items: [NSMetadataItem], limit: Int, isFolder: Bool, authorizedPaths: [String]) -> [FileSystemItem] {
+    private func parseItems(from items: [NSMetadataItem], limit: Int, isFolder: Bool, authorizedPaths: [String], seenPaths: inout Set<String>) -> [FileSystemItem] {
         var results: [FileSystemItem] = []
 
         for item in items {
@@ -227,6 +317,10 @@ class SpotlightManager: NSObject {
             }
 
             if config.isPathExcluded(path) {
+                continue
+            }
+
+            if seenPaths.contains(path) {
                 continue
             }
 
@@ -256,6 +350,7 @@ class SpotlightManager: NSObject {
                 version: nil,
                 useCount: useCount
             ))
+            seenPaths.insert(path)
 
             if results.count >= limit {
                 break
@@ -307,8 +402,14 @@ class SpotlightManager: NSObject {
         }
     }
 
-    deinit {
-        currentQuery?.stop()
+    @MainActor deinit {
+        for (_, context) in activeQueries {
+            context.timeoutTask?.cancel()
+            context.query.stop()
+            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: context.query)
+            context.continuation.resume(throwing: SpotlightError.queryFailed("Deinit before completion"))
+        }
+        activeQueries.removeAll()
         NotificationCenter.default.removeObserver(self)
     }
 }

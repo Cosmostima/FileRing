@@ -8,14 +8,24 @@
 import Foundation
 import AppKit
 
+private final class AppQueryContext {
+    let query: NSMetadataQuery
+    let continuation: CheckedContinuation<[NSMetadataItem], Error>
+    var timeoutTask: Task<Void, Never>?
+
+    init(query: NSMetadataQuery, continuation: CheckedContinuation<[NSMetadataItem], Error>) {
+        self.query = query
+        self.continuation = continuation
+    }
+}
+
+private final class CancellationToken: @unchecked Sendable {
+    var identifier: ObjectIdentifier?
+}
+
 @MainActor
 class AppSpotlightManager: NSObject {
-    private var currentQuery: NSMetadataQuery?
-    private var continuation: CheckedContinuation<[NSMetadataItem], Error>?
-    private var timeoutTask: Task<Void, Never>?
-
-    // Query serialization to prevent continuation overwrites
-    private var isQueryRunning = false
+    private var activeQueries: [ObjectIdentifier: AppQueryContext] = [:]
 
     private let config: SpotlightConfig
 
@@ -71,73 +81,83 @@ class AppSpotlightManager: NSObject {
         sortBy: String,
         ascending: Bool
     ) async throws -> [NSMetadataItem] {
-        // Wait for any existing query to complete (reduce delay to 10ms for lower latency)
-        while isQueryRunning {
-            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
-        }
+        let cancellationToken = CancellationToken()
 
-        isQueryRunning = true
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let query = NSMetadataQuery()
+                let identifier = ObjectIdentifier(query)
 
-        return try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
+                let context = AppQueryContext(query: query, continuation: continuation)
+                activeQueries[identifier] = context
+                cancellationToken.identifier = identifier
 
-            let query = NSMetadataQuery()
-            self.currentQuery = query
+                // Set search scope - ALWAYS search entire system for apps
+                // (Applications are typically in /Applications which is outside user home)
+                query.searchScopes = [NSMetadataQueryLocalComputerScope]
 
-            // Set search scope - ALWAYS search entire system for apps
-            // (Applications are typically in /Applications which is outside user home)
-            query.searchScopes = [NSMetadataQueryLocalComputerScope]
+                // Build predicate for applications
+                let startDate = Calendar.current.date(byAdding: .day, value: daysAgo, to: Date())!
+                var predicates: [NSPredicate] = [
+                    NSPredicate(format: "kMDItemContentType == %@", "com.apple.application-bundle"),
+                    NSPredicate(format: "\(attribute) >= %@", startDate as NSDate)
+                ]
 
-            // Build predicate for applications
-            let startDate = Calendar.current.date(byAdding: .day, value: daysAgo, to: Date())!
-            var predicates: [NSPredicate] = [
-                NSPredicate(format: "kMDItemContentType == %@", "com.apple.application-bundle"),
-                NSPredicate(format: "\(attribute) >= %@", startDate as NSDate)
-            ]
-
-            // Optional: Exclude system applications
-            if config.excludeSystemApps {
-                predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/System"))
-                predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/Library"))
-            }
-
-            query.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-
-            // Set sort descriptors
-            query.sortDescriptors = [NSSortDescriptor(key: sortBy, ascending: ascending)]
-
-            // Register notifications
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(queryDidFinishGathering),
-                name: .NSMetadataQueryDidFinishGathering,
-                object: query
-            )
-
-            // Start query
-            query.start()
-
-            // Setup timeout
-            let timeoutSeconds = config.queryTimeoutSeconds
-            self.timeoutTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
-                    self?.handleTimeout()
-                } catch {
-                    // Task was cancelled, which is expected
+                // Optional: Exclude system applications
+                if config.excludeSystemApps {
+                    predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/System"))
+                    predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/Library"))
                 }
+
+                query.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+
+                // Set sort descriptors
+                query.sortDescriptors = [NSSortDescriptor(key: sortBy, ascending: ascending)]
+
+                // Register notifications
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(queryDidFinishGathering),
+                    name: .NSMetadataQueryDidFinishGathering,
+                    object: query
+                )
+
+                // Start query
+                query.start()
+
+                // Setup timeout
+                let timeoutSeconds = config.queryTimeoutSeconds
+                context.timeoutTask = Task { [weak self, weak query] in
+                    guard let query = query else { return }
+                    guard let self = self else { return }
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
+                        if Task.isCancelled { return }
+                        await self.handleTimeout(for: query)
+                    } catch {
+                        // Task cancelled, ignore
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                guard let id = cancellationToken.identifier else { return }
+                self.cancelQuery(with: id, error: CancellationError())
             }
         }
     }
 
     @objc private func queryDidFinishGathering(_ notification: Notification) {
-        timeoutTask?.cancel()
-
         guard let query = notification.object as? NSMetadataQuery else {
-            continuation?.resume(throwing: SpotlightError.queryFailed("Invalid query object"))
-            continuation = nil
             return
         }
+
+        let identifier = ObjectIdentifier(query)
+        guard let context = activeQueries.removeValue(forKey: identifier) else {
+            return
+        }
+
+        context.timeoutTask?.cancel()
 
         query.disableUpdates()
 
@@ -149,28 +169,33 @@ class AppSpotlightManager: NSObject {
         }
 
         query.stop()
-        currentQuery = nil
         NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
 
-        continuation?.resume(returning: items)
-        continuation = nil
-        isQueryRunning = false
+        context.continuation.resume(returning: items)
     }
 
-    private func handleTimeout() {
-        guard let query = currentQuery else { return }
+    private func handleTimeout(for query: NSMetadataQuery) async {
+        cancelQuery(for: query, error: SpotlightError.timeout)
+    }
 
-        // Properly stop the query to free resources
+    private func cancelQuery(for query: NSMetadataQuery, error: Error) {
+        cancelQuery(with: ObjectIdentifier(query), error: error)
+    }
+
+    private func cancelQuery(with identifier: ObjectIdentifier, error: Error) {
+        guard let context = activeQueries.removeValue(forKey: identifier) else {
+            return
+        }
+
+        context.timeoutTask?.cancel()
+
+        let query = context.query
         query.disableUpdates()
         query.stop()
-        currentQuery = nil
 
-        // Remove observer to prevent memory leaks
         NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
 
-        continuation?.resume(throwing: SpotlightError.timeout)
-        continuation = nil
-        isQueryRunning = false
+        context.continuation.resume(throwing: error)
     }
 
     // MARK: - Result Parsing
@@ -229,8 +254,14 @@ class AppSpotlightManager: NSObject {
         return formatter.string(from: date)
     }
 
-    deinit {
-        currentQuery?.stop()
+    @MainActor deinit {
+        for (_, context) in activeQueries {
+            context.timeoutTask?.cancel()
+            context.query.stop()
+            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: context.query)
+            context.continuation.resume(throwing: SpotlightError.queryFailed("Deinit before completion"))
+        }
+        activeQueries.removeAll()
         NotificationCenter.default.removeObserver(self)
     }
 }

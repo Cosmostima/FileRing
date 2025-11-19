@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import os.log
 
 @MainActor
 class FileSystemService {
@@ -44,6 +45,10 @@ class FileSystemService {
 
     // MARK: - File Operations
     func fetchRecentlyOpenedFiles(limit: Int = 10) async throws -> [FileItem] {
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentFiles", signpostID: signpostID)
+        defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentFiles", signpostID: signpostID) }
+
         // If app search is disabled, return files only (zero overhead)
         guard config.enableAppSearch else {
             return try await spotlight.queryRecentlyOpenedFiles(limit: limit)
@@ -54,11 +59,19 @@ class FileSystemService {
     }
 
     func fetchRecentlySavedFiles(limit: Int = 10) async throws -> [FileItem] {
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentSavedFiles", signpostID: signpostID)
+        defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentSavedFiles", signpostID: signpostID) }
+
         // Recently saved only applies to files, not apps
         return try await spotlight.queryRecentlySavedFiles(limit: limit)
     }
 
     func fetchFrequentlyOpenedFiles(limit: Int = 10) async throws -> [FileItem] {
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "FetchFrequentFiles", signpostID: signpostID)
+        defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchFrequentFiles", signpostID: signpostID) }
+
         // If app search is disabled, return files only (zero overhead)
         guard config.enableAppSearch else {
             return try await spotlight.queryFrequentlyOpenedFiles(limit: limit)
@@ -70,14 +83,26 @@ class FileSystemService {
 
     // MARK: - Folder Operations
     func fetchRecentlyOpenedFolders(limit: Int = 10) async throws -> [FolderItem] {
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentFolders", signpostID: signpostID)
+        defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentFolders", signpostID: signpostID) }
+
         return try await spotlight.queryRecentlyOpenedFolders(limit: limit)
     }
 
     func fetchRecentlyModifiedFolders(limit: Int = 10) async throws -> [FolderItem] {
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentModifiedFolders", signpostID: signpostID)
+        defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentModifiedFolders", signpostID: signpostID) }
+
         return try await spotlight.queryRecentlyModifiedFolders(limit: limit)
     }
 
     func fetchFrequentlyOpenedFolders(limit: Int = 10) async throws -> [FolderItem] {
+        let signpostID = OSSignpostID(log: .pointsOfInterest)
+        os_signpost(.begin, log: .pointsOfInterest, name: "FetchFrequentFolders", signpostID: signpostID)
+        defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchFrequentFolders", signpostID: signpostID) }
+
         return try await spotlight.queryFrequentlyOpenedFolders(limit: limit)
     }
 
