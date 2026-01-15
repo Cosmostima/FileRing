@@ -75,7 +75,7 @@ FileRing 仅访问您明确授权的文件夹。该应用程序对您选择的�
 
 ### 4. 菜单栏应用
 
-FileRing 是一个轻量级的菜单栏应用程序。（在设置里可以把 Dock 图标设为隐藏）
+FileRing 是一个轻量级的菜单栏应用程序。Dock 图标和状态栏图标都可以在设置中自定义。点击 Dock 图标（可见时）可快速打开设置。
 <div align="center">
 <img src="Assets/MenuBar.png" alt="MenuBar Example" width="50%"/>
 </div>
@@ -174,7 +174,7 @@ open /Applications/FileRing.app
 - **常规按键**：A-Z、0-9、空格或其他标准按键
 - **示例**：`⌃X`、`⌥Space`、`⌘⇧D`
 
-**注意**：由于 macOS Carbon API 的限制，不支持仅使用修饰键的快捷方式（例如单独按 ⌥ Option）。
+**注意**：不支持仅使用修饰键的快捷方式（例如单独按 ⌥ Option）。
 
 **更改快捷键：**
 1. 从菜单栏打开“设置”
@@ -217,6 +217,7 @@ open /Applications/FileRing.app
 
 - **开机启动**：登录 Mac 时自动启动 FileRing
 - **隐藏程序坞图标**：使 FileRing 仅在菜单栏显示（需要重启）
+- **隐藏状态栏图标**：隐藏状态栏图标（立即生效）。应用仍可通过快捷键或程序坞图标访问
 
 **设置 → 重置**
 

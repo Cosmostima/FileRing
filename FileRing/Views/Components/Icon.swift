@@ -10,24 +10,27 @@ import SwiftUI
 struct Icon: View {
     var body: some View {
         GeometryReader{ proxy in
-            HStack(spacing:0){
-                Circle()
+            VStack(spacing: proxy.size.height/10){
+                Capsule()
                     .fill(.blue)
-                    .frame(width: proxy.size.height, height: proxy.size.height)
-
-                VStack(spacing: proxy.size.height/10){
+                    .frame(height: proxy.size.height/5)
+                
+                HStack{
+                    Circle()
+                        .fill(.blue)
+                        .frame(width: proxy.size.height*0.3, height:proxy.size.height*0.3)
                     Capsule()
                         .fill(.blue)
-                    Capsule()
-                        .fill(.blue)
-                    Capsule()
-                        .fill(.blue)
+                        .frame(height: proxy.size.height/5)
                 }
-                .padding(.vertical, proxy.size.height/100*3)
-                .padding(.leading, proxy.size.height/8)
+                .frame(maxHeight: .infinity)
+                
+                Capsule()
+                    .fill(.blue)
+                    .frame(height: proxy.size.height/5)
             }
+            .padding(.vertical, proxy.size.height/100*3)
         }
-        .aspectRatio(1.8/1, contentMode: .fit)
     }
 }
 
@@ -39,7 +42,7 @@ struct IconWithBackground: View {
                     .fill(.white)
                     .shadow(radius: proxy.size.height/10)
                 Icon()
-                    .padding(proxy.size.height/6)
+                    .padding(proxy.size.height/5)
             }
         }
         .aspectRatio(1, contentMode: .fit)

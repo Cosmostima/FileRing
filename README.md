@@ -75,7 +75,7 @@ FileRing only accesses folders you explicitly authorize. The app has read-only a
 
 ### 4. Menu Bar App
 
-FileRing runs as a lightweight menu bar application. (The dock icon can be set to hidden in Settings.)
+FileRing runs as a lightweight menu bar application. Both the dock icon and status bar icon can be customized in Settings. Click the dock icon (when visible) to quickly open Settings.
 <div align="center">
 <img src="Assets/MenuBar.png" alt="MenuBar Example" width="50%"/>
 </div>
@@ -182,7 +182,7 @@ You must combine one or more modifier keys with a regular key:
 - **Regular Keys**: A-Z, 0-9, Space, or other standard keys
 - **Examples**: `⌃X`, `⌥Space`, `⌘⇧D`
 
-**Note**: Modifier-only shortcuts (like just ⌥ Option alone) are not supported due to macOS Carbon API limitations.
+**Note**: Modifier-only shortcuts (like just ⌥ Option alone) are not supported.
 
 **To change the hotkey:**
 1. Open Settings from the menubar
@@ -227,6 +227,7 @@ Click "Manage" to add or remove items. Changes take effect immediately.
 
 - **Launch at Startup**: Automatically start FileRing when you log in to your Mac
 - **Hide Dock Icon**: Make FileRing menubar-only (requires restart)
+- **Hide Status Bar Icon**: Hide the status bar icon (takes effect immediately). App remains accessible via hotkey or dock icon
 
 **Settings → Reset**
 

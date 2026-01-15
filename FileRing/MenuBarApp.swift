@@ -15,13 +15,14 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
     private var eventMonitor: Any?
     private var hostingView: NSHostingView<DoubleRingPanelView>?
-    private var hotkeyManager: HotkeyManager?
+    private var eventTapManager: EventTapManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ensureDefaultHotkeySettings()
         applyDockIconVisibility()
         setupHotkeyManager()
         setupStatusBarItem()
+        applyStatusBarIconVisibility()
         setupPopupPanel()
         setupEscapeKeyMonitor()
 
@@ -31,14 +32,40 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
             _ = BookmarkManager.shared.loadUrl(withKey: key)
         }
 
-        // Show onboarding for first-time users
-        showOnboardingIfNeeded()
+        // Show onboarding for first-time users, or open settings on launch
+        let hasSeenOnboarding = UserDefaults.standard.bool(forKey: "FileRingHasSeenOnboarding")
+        if hasSeenOnboarding {
+            // If user has completed onboarding, automatically open settings on launch
+            // This provides easy access when clicking the app icon or opening from Spotlight
+            // Delay to ensure app is fully initialized
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.openSettings()
+            }
+        } else {
+            showOnboardingIfNeeded()
+        }
 
         // Listen for reset notification from settings
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleShowOnboarding),
             name: Notification.Name("ShowOnboarding"),
+            object: nil
+        )
+
+        // Listen for hotkey setting changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotkeySettingChanged),
+            name: .hotkeySettingChanged,
+            object: nil
+        )
+
+        // Listen for status bar icon visibility changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStatusBarIconVisibilityChanged),
+            name: .statusBarIconVisibilityChanged,
             object: nil
         )
     }
@@ -71,10 +98,50 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func applyStatusBarIconVisibility() {
+        let hideStatusBarIcon = UserDefaults.standard.bool(forKey: "FileRingHideStatusBarIcon")
+
+        if hideStatusBarIcon {
+            // Hide status bar icon
+            if let statusItem = statusItem {
+                NSStatusBar.system.removeStatusItem(statusItem)
+                self.statusItem = nil
+            }
+        } else {
+            // Show status bar icon (if not already shown)
+            if statusItem == nil {
+                setupStatusBarItem()
+            }
+        }
+    }
+
+    @objc private func handleStatusBarIconVisibilityChanged() {
+        applyStatusBarIconVisibility()
+    }
+
     private func setupHotkeyManager() {
-        hotkeyManager = HotkeyManager()
-        hotkeyManager?.delegate = self
-        hotkeyManager?.updateRegistration()
+        eventTapManager = EventTapManager()
+        eventTapManager?.delegate = self
+
+        // Check permission
+        checkEventTapPermission()
+    }
+
+    private func checkEventTapPermission() {
+        guard let manager = eventTapManager else { return }
+
+        if manager.checkPermission() {
+            manager.updateRegistration()
+        } else {
+            Task {
+                let granted = await manager.requestPermission()
+                if granted {
+                    manager.updateRegistration()
+                } else {
+                    showAccessibilityPermissionGuide()
+                }
+            }
+        }
     }
 
     // MARK: - Status Bar Item
@@ -234,6 +301,10 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         window.isReleasedWhenClosed = false
 
         onboardingWindow = window
+
+        // Ensure dock icon visibility setting is applied before activating
+        applyDockIconVisibility()
+
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -262,6 +333,9 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
 
             settingsWindow = window
         }
+
+        // Ensure dock icon visibility setting is applied before activating
+        applyDockIconVisibility()
 
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -320,11 +394,30 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    private func showAccessibilityPermissionGuide() {
+        let alert = NSAlert()
+        alert.messageText = "Permission Required"
+        alert.informativeText = "FileRing needs Accessibility permission to capture global hotkeys. Please grant permission in Settings."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Ensure dock icon visibility setting is applied when app is reactivated
+        applyDockIconVisibility()
+        // When user clicks dock icon or activates the app, open settings
+        openSettings()
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
         }
-        hotkeyManager?.cleanup()
+        eventTapManager?.cleanup()
+
+        NotificationCenter.default.removeObserver(self)
     }
 
     private func formattedHotkeyDescription(modifierKey: String, key: String) -> String {
@@ -350,6 +443,12 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         }
 
         return "\(modifierSymbol) + \(keyDescription)"
+    }
+
+    // MARK: - Hotkey Configuration
+
+    @objc private func handleHotkeySettingChanged() {
+        eventTapManager?.updateRegistration()
     }
 }
 

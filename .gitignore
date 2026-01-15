@@ -1,5 +1,6 @@
 # Xcode
 build/
+.xcodebuild/
 *.pbxuser
 !default.pbxuser
 *.mode1v3
@@ -48,5 +49,6 @@ Carthage/Build/
 *.swo
 *~
 
-# Claude Code
+# Vibe Coding
 .claude/
+.sisyphus/

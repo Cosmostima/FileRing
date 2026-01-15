@@ -16,4 +16,5 @@ extension Notification.Name {
     static let hotkeyRecordingStarted = Notification.Name("hotkeyRecordingStarted")
     static let hotkeyRecordingEnded = Notification.Name("hotkeyRecordingEnded")
     static let spotlightConfigChanged = Notification.Name("spotlightConfigChanged")
+    static let statusBarIconVisibilityChanged = Notification.Name("statusBarIconVisibilityChanged")
 }

@@ -1,68 +1,240 @@
 //
-//  EventTapManager.swift
-//  PopUp
+// EventTapManager.swift
+// FileRing
 //
-//  Low-level event monitoring manager based on CGEventTap
-//  Provides automatic recovery mechanism, no manual handling needed for system sleep/wake
+// Extended CGEventTap-based manager with hotkey support
+// Provides automatic recovery mechanism with sleep/wake handling
 //
 
 import Foundation
 import CoreGraphics
-import Carbon
+import AppKit
+import Carbon.HIToolbox
+import ApplicationServices
 
-/// Event type
+// MARK: - Hotkey Types
+
+enum HotkeyState {
+    case idle
+    case pressed
+}
+
+struct HotkeyConfig: Equatable {
+    let modifiers: [String]
+    let keyCode: UInt32?
+
+    nonisolated var isSingleModifier: Bool {
+        return modifiers.count == 1 && modifiers.allSatisfy({
+            ["command", "control", "option", "alt", "shift"].contains($0.lowercased())
+        }) && keyCode == nil
+    }
+}
+
+// HotkeyManagerDelegate protocol is defined in HotkeyManager.swift
+
 enum EventTapType {
-    case keyboard       // Keyboard events (keyDown, keyUp)
-    case modifierFlags  // Modifier flag change events (flagsChanged)
+    case keyboard
+    case modifierFlags
 }
 
-/// Event callback result
 enum EventTapResult {
-    case consume    // Consume event, don't pass to other apps
-    case forward    // Forward event
+    case consume
+    case forward
 }
 
-/// EventTap manager
 class EventTapManager {
+
     // MARK: - Properties
 
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    private var runLoop: CFRunLoop?
-    private var runLoopQueue: DispatchQueue?
+    // Properties accessed from background thread (nonisolated)
+    nonisolated(unsafe) private var eventTap: CFMachPort?
+    nonisolated(unsafe) private var runLoopSource: CFRunLoopSource?
+    nonisolated(unsafe) private var runLoop: CFRunLoop?
+    nonisolated(unsafe) private var runLoopQueue: DispatchQueue?
 
-    private let eventType: EventTapType
-    private let callback: (CGEvent) -> EventTapResult
+    nonisolated(unsafe) private var eventType: EventTapType
+    nonisolated(unsafe) private var callback: (CGEvent) -> EventTapResult
 
-    private var isRunning = false
-    private var stopSemaphore: DispatchSemaphore?
+    nonisolated(unsafe) private var isRunning = false
+    nonisolated(unsafe) private var stopSemaphore: DispatchSemaphore?
+
+    nonisolated(unsafe) private var currentConfig: HotkeyConfig?
+    nonisolated(unsafe) private var hotkeyState: HotkeyState = .idle
+    nonisolated(unsafe) private var modifierFlags: CGEventFlags = []
+
+    // Track if we consumed the keyDown event (to ensure keyDown/keyUp pairing)
+    nonisolated(unsafe) private var didConsumeKeyDown = false
+
+    // Properties accessed from main actor
+    @MainActor weak var delegate: HotkeyManagerDelegate?
+
+    // Recording state support (like HotkeyManager)
+    nonisolated(unsafe) private var isRecordingHotkey = false
 
     // MARK: - Initialization
 
-    /// Initialize event listener
-    /// - Parameters:
-    ///   - type: Type of events to monitor
-    ///   - callback: Event callback, returns whether to consume the event
     init(type: EventTapType, callback: @escaping (CGEvent) -> EventTapResult) {
         self.eventType = type
         self.callback = callback
     }
 
+    @MainActor convenience init() {
+        self.init(type: .keyboard, callback: { event in
+            return .forward
+        })
+
+        setupSleepWakeNotifications()
+        setupSettingsObserver()
+        setupRecordingObservers()
+    }
+
     deinit {
+        // Cleanup will be called automatically when the instance is deallocated
+    }
+
+    // MARK: - HotkeyManager Compatible API
+
+    @MainActor func updateRegistration() {
+        // Read configuration from UserDefaults
+        let defaults = UserDefaults.standard
+        let modifierSetting = defaults.string(forKey: "FileRingModifierKey") ?? "control"
+        let keySetting = defaults.string(forKey: "FileRingKeyEquivalent") ?? "x"
+
+        // Validate configuration
+        guard !keySetting.isEmpty else {
+            return
+        }
+
+        guard let keyCode = keyCodeFromString(keySetting) else {
+            return
+        }
+
+        // Parse modifiers
+        let modifiers = modifierSetting.split(separator: "+")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+
+        // Update hotkey configuration
+        updateHotkey(modifiers: modifiers, keyCode: keyCode)
+    }
+
+    func cleanup() {
         stopAndWait()
-        cleanup()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    // MARK: - Sleep/Wake Notifications
+
+    private func setupSleepWakeNotifications() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleWillSleep() {
+        // System is about to sleep: stop event tap
+        stop()
+    }
+
+    @objc private func handleDidWake() {
+        // System woke up: restart event tap
+        // Delay a bit to ensure system is stable
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            self.start()
+        }
+    }
+
+    // MARK: - Settings Observer
+
+    private func setupSettingsObserver() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSettingsChanged),
+            name: Notification.Name("hotkeySettingChanged"),
+            object: nil
+        )
+    }
+
+    @MainActor @objc private func handleSettingsChanged() {
+        updateRegistration()
+    }
+
+    // MARK: - Recording Observers
+
+    private func setupRecordingObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRecordingStarted),
+            name: Notification.Name("hotkeyRecordingStarted"),
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRecordingEnded),
+            name: Notification.Name("hotkeyRecordingEnded"),
+            object: nil
+        )
+    }
+
+    @objc private func handleRecordingStarted() {
+        isRecordingHotkey = true
+    }
+
+    @objc private func handleRecordingEnded() {
+        isRecordingHotkey = false
+    }
+
+    // MARK: - Hotkey Management
+
+    func updateHotkey(modifiers: [String], keyCode: UInt32?) {
+        let newConfig = HotkeyConfig(modifiers: modifiers, keyCode: keyCode)
+
+        guard newConfig != currentConfig else {
+            return
+        }
+
+        currentConfig = newConfig
+
+        // Reset state when changing hotkey configuration
+        didConsumeKeyDown = false
+        hotkeyState = .idle  // CRITICAL: Reset to prevent hotkey from being stuck in .pressed state
+
+        stop()
+        start()
+    }
+
+    // MARK: - Permission Handling
+
+    func checkPermission() -> Bool {
+        let hasPermission = CGPreflightPostEventAccess()
+        print("[EventTapManager] Post Event permission check: \(hasPermission)")
+        return hasPermission
+    }
+
+    func requestPermission() async -> Bool {
+        print("[EventTapManager] Requesting Post Event permission...")
+        let granted = CGRequestPostEventAccess()
+        print("[EventTapManager] Permission request result: \(granted)")
+        return granted
     }
 
     // MARK: - Public Methods
 
-    /// Start event monitoring
     func start() {
-        guard !isRunning else {
-            return
-        }
+        guard !isRunning else { return }
 
-        // Create dedicated queue to run RunLoop
-        let queue = DispatchQueue(label: "com.popup.eventtap.\(UUID().uuidString)", qos: .userInteractive)
+        let queue = DispatchQueue(label: "com.filering.eventtap.\(UUID().uuidString)", qos: .userInteractive)
         self.runLoopQueue = queue
 
         queue.async { [weak self] in
@@ -71,9 +243,31 @@ class EventTapManager {
         }
     }
 
-    /// Stop event monitoring (blocking until fully stopped)
+    func stop() {
+        guard isRunning else { return }
+
+        // Reset state when stopping to prevent stale state issues
+        // E.g., if user is holding hotkey when stop() is called, and then start() is called later
+        didConsumeKeyDown = false
+        hotkeyState = .idle  // CRITICAL: Reset to prevent hotkey from being stuck in .pressed state
+
+        if let runLoop = runLoop {
+            CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes as CFTypeRef) { [weak self] in
+                self?.disableEventTap()
+                CFRunLoopStop(runLoop)
+            }
+            CFRunLoopWakeUp(runLoop)
+        }
+
+        isRunning = false
+    }
+
     func stopAndWait() {
         guard isRunning else { return }
+
+        // Reset state when stopping (same reason as stop())
+        didConsumeKeyDown = false
+        hotkeyState = .idle  // CRITICAL: Reset to prevent hotkey from being stuck in .pressed state
 
         let semaphore = DispatchSemaphore(value: 0)
         self.stopSemaphore = semaphore
@@ -85,50 +279,38 @@ class EventTapManager {
             }
             CFRunLoopWakeUp(runLoop)
         } else {
-            // If runLoop not yet created, signal immediately
             semaphore.signal()
         }
 
-        // Wait for RunLoop to fully stop (max 1 second)
         _ = semaphore.wait(timeout: .now() + 1.0)
 
         isRunning = false
         self.stopSemaphore = nil
     }
 
-    /// Non-blocking stop (for deinit and similar scenarios)
-    func stop() {
-        guard isRunning else { return }
-
-        if let runLoop = runLoop {
-            CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes as CFTypeRef) { [weak self] in
-                self?.disableEventTap()
-                CFRunLoopStop(runLoop)
-            }
-            CFRunLoopWakeUp(runLoop)
-        }
-
-        isRunning = false
-    }
-
     // MARK: - Private Methods
 
-    /// Setup event tap
-    private func setupEventTap() {
-        // Determine which event types to monitor
+    nonisolated private func setupEventTap() {
         let eventsOfInterest: CGEventMask
-        switch eventType {
-        case .keyboard:
+
+        if let config = currentConfig {
+            if config.isSingleModifier {
+                eventsOfInterest = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+            } else {
+                eventsOfInterest = CGEventMask(
+                    (1 << CGEventType.keyDown.rawValue) |
+                    (1 << CGEventType.keyUp.rawValue) |
+                    (1 << CGEventType.flagsChanged.rawValue)
+                )
+            }
+        } else {
             eventsOfInterest = CGEventMask(
                 (1 << CGEventType.keyDown.rawValue) |
                 (1 << CGEventType.keyUp.rawValue) |
                 (1 << CGEventType.flagsChanged.rawValue)
             )
-        case .modifierFlags:
-            eventsOfInterest = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         }
 
-        // Create event callback
         let callback: CGEventTapCallBack = { proxy, type, event, refcon in
             guard let refcon = refcon else {
                 return Unmanaged.passUnretained(event)
@@ -138,7 +320,6 @@ class EventTapManager {
             return manager.handleEvent(type: type, event: event)
         }
 
-        // Create event tap
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -148,40 +329,32 @@ class EventTapManager {
             callback: callback,
             userInfo: selfPtr
         ) else {
+            print("[EventTapManager] Failed to create event tap - Post Event permission required (Accessibility)")
             stopSemaphore?.signal()
             return
         }
 
         self.eventTap = tap
 
-        // Create RunLoop source
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         self.runLoopSource = source
 
-        // Get current RunLoop
         let currentRunLoop = CFRunLoopGetCurrent()
         self.runLoop = currentRunLoop
 
-        // Add to RunLoop
         CFRunLoopAddSource(currentRunLoop, source, .commonModes)
 
-        // Enable event tap
         CGEvent.tapEnable(tap: tap, enable: true)
         isRunning = true
 
-        // Run RunLoop
         CFRunLoopRun()
 
-        // Cleanup resources after RunLoop stops
-        cleanup()
+        cleanupResources()
 
-        // Notify waiters
         stopSemaphore?.signal()
     }
 
-    /// Handle event
-    private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent> {
-        // Critical: Handle case when event tap is disabled (triggered after system sleep)
+    nonisolated private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout {
             if let eventTap = self.eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
@@ -193,39 +366,226 @@ class EventTapManager {
             return Unmanaged.passUnretained(event)
         }
 
-        // Call user callback
+        // Update modifier flags when they change
+        if type == .flagsChanged {
+            modifierFlags = event.flags
+        }
+
+        if isHotkeyEvent(event) {
+            handleHotkeyEvent(event)
+
+            // Track keyDown/keyUp state to ensure proper event pairing
+            if type == .keyDown {
+                didConsumeKeyDown = true
+            } else if type == .keyUp {
+                didConsumeKeyDown = false
+            }
+
+            // Return nil to consume the event and prevent system beep
+            return nil
+        }
+
         let result = callback(event)
 
         switch result {
         case .consume:
-            // Return null event to consume - system handles the original event properly
-            // Using passUnretained on the original event signals consumption without memory leak
-            return Unmanaged.passUnretained(event)
+            return nil
         case .forward:
             return Unmanaged.passUnretained(event)
         }
     }
 
-    /// Disable event tap
-    private func disableEventTap() {
-        if let eventTap = eventTap {
+    nonisolated private func isHotkeyEvent(_ event: CGEvent) -> Bool {
+        guard let config = currentConfig else {
+            return false
+        }
+
+        let eventType = event.type
+
+        if config.isSingleModifier {
+            return eventType == .flagsChanged && isSingleModifierPressed(modifiers: config.modifiers)
+        }
+
+        // Check for both keyDown and keyUp events
+        if eventType == .keyDown || eventType == .keyUp {
+            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            if keyCode == Int(config.keyCode ?? 0) {
+                if eventType == .keyUp {
+                    // CRITICAL FIX: Only consume keyUp if we consumed the corresponding keyDown
+                    // This prevents intercepting keyUp events for keys we didn't intercept keyDown for
+                    // Without this check, pressing 'x' (without control) would have keyUp consumed
+                    // even though keyDown was not, breaking keyboard input in other apps
+                    return didConsumeKeyDown
+                }
+                // For keyDown, check modifiers
+                return modifiersMatch(event.flags, modifiers: config.modifiers)
+            }
+        }
+
+        return false
+    }
+
+    nonisolated private func handleHotkeyEvent(_ event: CGEvent) {
+        // Suspend hotkey handling during recording (like HotkeyManager)
+        guard !isRecordingHotkey else { return }
+
+        let eventType = event.type
+
+        if eventType == .keyDown || eventType == .flagsChanged {
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                // Only trigger if state is idle (prevent key repeat from triggering multiple times)
+                guard self.hotkeyState == .idle else { return }
+                self.hotkeyState = .pressed
+                self.delegate?.hotkeyPressed()
+            }
+        } else if eventType == .keyUp {
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                guard self.hotkeyState == .pressed else { return }
+                self.hotkeyState = .idle
+                self.delegate?.hotkeyReleased()
+            }
+        }
+    }
+
+    nonisolated private func isSingleModifierPressed(modifiers: [String]) -> Bool {
+        let requiredFlags = parseModifiers(modifiers)
+
+        // CRITICAL FIX: Filter out non-modifier flags (caps lock, fn, etc.)
+        // Same logic as modifiersMatch to ensure consistency
+        // Otherwise, Caps Lock would prevent single modifier hotkeys from working
+        let relevantMask: UInt64 = 0x100000 | 0x40000 | 0x20000 | 0x80000  // cmd|ctrl|shift|opt
+        let actualFlags = CGEventFlags(rawValue: modifierFlags.rawValue & relevantMask)
+
+        return actualFlags == requiredFlags
+    }
+
+    nonisolated private func modifiersMatch(_ flags: CGEventFlags, modifiers: [String]) -> Bool {
+        // CRITICAL FIX: Use EXACT match, not subset match
+        // We must ensure ONLY the specified modifiers are pressed, no more, no less
+        // Otherwise, hotkey like "control+x" would also trigger on "control+shift+x"
+        // which could interfere with other apps' shortcuts
+
+        let requiredFlags = parseModifiers(modifiers)
+
+        // Extract only the modifier flags we care about (command, control, shift, option)
+        // Ignore other flags like caps lock, function key, etc.
+        let relevantMask: UInt64 = 0x100000 | 0x40000 | 0x20000 | 0x80000  // cmd|ctrl|shift|opt
+        let actualFlags = CGEventFlags(rawValue: flags.rawValue & relevantMask)
+
+        // Exact match required
+        return actualFlags == requiredFlags
+    }
+
+    nonisolated private func parseModifiers(_ modifiers: [String]) -> CGEventFlags {
+        var flags: CGEventFlags = []
+
+        for modifier in modifiers {
+            switch modifier.lowercased() {
+            case "command":
+                flags.insert(.maskCommand)
+            case "control":
+                flags.insert(.maskControl)
+            case "shift":
+                flags.insert(.maskShift)
+            case "option", "alt":
+                flags.insert(.maskAlternate)
+            default:
+                break
+            }
+        }
+
+        return flags
+    }
+
+    nonisolated private func disableEventTap() {
+        if let eventTap = self.eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
         }
     }
 
-    /// Cleanup resources
-    private func cleanup() {
+    nonisolated private func cleanupResources() {
         if let runLoop = runLoop, let source = runLoopSource {
             CFRunLoopRemoveSource(runLoop, source, .commonModes)
             self.runLoopSource = nil
         }
 
-        if let tap = eventTap {
+        if let tap = self.eventTap {
             CFMachPortInvalidate(tap)
             self.eventTap = nil
         }
 
         self.runLoop = nil
         self.runLoopQueue = nil
+
+        // Reset state flags
+        didConsumeKeyDown = false
+        hotkeyState = .idle  // CRITICAL: Reset to prevent hotkey from being stuck in .pressed state
     }
+
+    // MARK: - Key Code Helper
+
+    nonisolated private func keyCodeFromString(_ key: String) -> UInt32? {
+        let lowercased = key.trimmingCharacters(in: .whitespaces).lowercased()
+
+        switch lowercased {
+        case "a": return UInt32(kVK_ANSI_A)
+        case "b": return UInt32(kVK_ANSI_B)
+        case "c": return UInt32(kVK_ANSI_C)
+        case "d": return UInt32(kVK_ANSI_D)
+        case "e": return UInt32(kVK_ANSI_E)
+        case "f": return UInt32(kVK_ANSI_F)
+        case "g": return UInt32(kVK_ANSI_G)
+        case "h": return UInt32(kVK_ANSI_H)
+        case "i": return UInt32(kVK_ANSI_I)
+        case "j": return UInt32(kVK_ANSI_J)
+        case "k": return UInt32(kVK_ANSI_K)
+        case "l": return UInt32(kVK_ANSI_L)
+        case "m": return UInt32(kVK_ANSI_M)
+        case "n": return UInt32(kVK_ANSI_N)
+        case "o": return UInt32(kVK_ANSI_O)
+        case "p": return UInt32(kVK_ANSI_P)
+        case "q": return UInt32(kVK_ANSI_Q)
+        case "r": return UInt32(kVK_ANSI_R)
+        case "s": return UInt32(kVK_ANSI_S)
+        case "t": return UInt32(kVK_ANSI_T)
+        case "u": return UInt32(kVK_ANSI_U)
+        case "v": return UInt32(kVK_ANSI_V)
+        case "w": return UInt32(kVK_ANSI_W)
+        case "x": return UInt32(kVK_ANSI_X)
+        case "y": return UInt32(kVK_ANSI_Y)
+        case "z": return UInt32(kVK_ANSI_Z)
+        case "0": return UInt32(kVK_ANSI_0)
+        case "1": return UInt32(kVK_ANSI_1)
+        case "2": return UInt32(kVK_ANSI_2)
+        case "3": return UInt32(kVK_ANSI_3)
+        case "4": return UInt32(kVK_ANSI_4)
+        case "5": return UInt32(kVK_ANSI_5)
+        case "6": return UInt32(kVK_ANSI_6)
+        case "7": return UInt32(kVK_ANSI_7)
+        case "8": return UInt32(kVK_ANSI_8)
+        case "9": return UInt32(kVK_ANSI_9)
+        case "space": return UInt32(kVK_Space)
+        case "escape", "esc": return UInt32(kVK_Escape)
+        default: return nil
+        }
+    }
+}
+
+// MARK: - CGEventFlags Extensions
+
+extension CGEventFlags {
+    nonisolated static var maskCommand: CGEventFlags { CGEventFlags(rawValue: 0x100000) }
+    nonisolated static var maskControl: CGEventFlags { CGEventFlags(rawValue: 0x40000) }
+    nonisolated static var maskShift: CGEventFlags { CGEventFlags(rawValue: 0x20000) }
+    nonisolated static var maskAlternate: CGEventFlags { CGEventFlags(rawValue: 0x80000) }
+}
+
+// MARK: - Delegate Protocol
+
+@MainActor
+protocol HotkeyManagerDelegate: AnyObject {
+    func hotkeyPressed()
+    func hotkeyReleased()
 }

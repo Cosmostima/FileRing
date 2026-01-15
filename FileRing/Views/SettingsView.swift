@@ -14,8 +14,10 @@ struct SettingsView: View {
     @State private var itemsPerSection = UserDefaults.standard.integer(forKey: "FileRingItemsPerSection") > 0
         ? UserDefaults.standard.integer(forKey: "FileRingItemsPerSection") : 6
     @State private var hideDockIcon = UserDefaults.standard.bool(forKey: "FileRingHideDockIcon")
+    @State private var hideStatusBarIcon = UserDefaults.standard.bool(forKey: "FileRingHideStatusBarIcon")
     @State private var authorizedFolders: [String] = BookmarkManager.shared.bookmarkKeys()
     @State private var showResetAlert = false
+    @State private var showBothHiddenWarning = false
 
     // Spotlight filter configuration
     @State private var spotlightConfig = SpotlightConfig.load()
@@ -27,6 +29,9 @@ struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var showLaunchError = false
     @State private var launchErrorMessage = ""
+
+    // Permission status
+    @State private var hasAccessibilityPermission = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -42,6 +47,9 @@ struct SettingsView: View {
                         .fontWeight(.bold)
                 }
                 hotkeySection
+                if !hasAccessibilityPermission {
+                    permissionSection
+                }
                 displaySection
                 folderPermissionSection
                 filterSettingsSection
@@ -57,6 +65,8 @@ struct SettingsView: View {
         .onAppear {
             // Sync launch at login state from system
             launchAtLogin = launchAtLoginManager.isLaunchAtLoginEnabled
+            // Check permission status
+            checkPermissionStatus()
         }
         .alert("Reset FileRing?", isPresented: $showResetAlert) {
             Button("Cancel", role: .cancel) { }
@@ -70,6 +80,25 @@ struct SettingsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(launchErrorMessage)
+        }
+        .alert("Warning", isPresented: $showBothHiddenWarning) {
+            Button("Cancel", role: .cancel) {
+                // Revert the most recent change
+                DispatchQueue.main.async {
+                    if hideDockIcon && hideStatusBarIcon {
+                        // Find which one was changed last by checking current notification
+                        // Since we can't determine this easily, revert status bar icon as it's instant
+                        hideStatusBarIcon = false
+                        UserDefaults.standard.set(false, forKey: "FileRingHideStatusBarIcon")
+                        NotificationCenter.default.post(name: .statusBarIconVisibilityChanged, object: nil)
+                    }
+                }
+            }
+            Button("Continue", role: .destructive) {
+                // Allow both to be hidden
+            }
+        } message: {
+            Text("Hiding both the dock icon and status bar icon will make the app only accessible through the hotkey. You can reopen settings by clicking the app in Applications folder or Spotlight.")
         }
         .sheet(isPresented: $showFolderFilterEditor) {
             FilterListEditorView(
@@ -121,6 +150,60 @@ struct SettingsView: View {
             Text(hotkeyDescription)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var permissionSection: some View {
+        Section("Accessibility Permission") {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Image(systemName: hasAccessibilityPermission ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(hasAccessibilityPermission ? .green : .orange)
+                        Text(hasAccessibilityPermission ? "Permission Granted" : "Permission Required")
+                            .font(.body)
+                    }
+
+                    if !hasAccessibilityPermission {
+                        Text("FileRing needs Accessibility permission to capture global hotkeys.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if !hasAccessibilityPermission {
+                    Button("Open System Settings") {
+                        openAccessibilitySettings()
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Refresh") {
+                        checkPermissionStatus()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(.vertical, 4)
+
+            if !hasAccessibilityPermission {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("To grant permission:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Open System Settings > Privacy & Security > Accessibility", systemImage: "1.circle.fill")
+                        Label("Click the lock icon to unlock (admin password required)", systemImage: "2.circle.fill")
+                        Label("Find FileRing in the list and enable it", systemImage: "3.circle.fill")
+                        Label("Restart FileRing if needed", systemImage: "4.circle.fill")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
         }
     }
 
@@ -216,11 +299,30 @@ struct SettingsView: View {
             Toggle("Hide Dock icon", isOn: $hideDockIcon)
                 .onChange(of: hideDockIcon) { newValue in
                     UserDefaults.standard.set(newValue, forKey: "FileRingHideDockIcon")
+                    // Check if both are hidden
+                    if newValue && hideStatusBarIcon {
+                        showBothHiddenWarning = true
+                    }
                     // Note: Dock icon visibility is applied on app restart
                     // Implementation is in MenuBarApp.applicationDidFinishLaunching
                 }
 
             Text("When enabled, app appears only in status bar. Requires restart to take effect.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Hide Status Bar icon", isOn: $hideStatusBarIcon)
+                .onChange(of: hideStatusBarIcon) { newValue in
+                    UserDefaults.standard.set(newValue, forKey: "FileRingHideStatusBarIcon")
+                    // Check if both are hidden
+                    if newValue && hideDockIcon {
+                        showBothHiddenWarning = true
+                    }
+                    // Notify MenuBarApp to update status bar icon visibility
+                    NotificationCenter.default.post(name: .statusBarIconVisibilityChanged, object: nil)
+                }
+
+            Text("When enabled, status bar icon will be hidden. App can still be accessed via hotkey or dock icon.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -475,5 +577,25 @@ struct SettingsView: View {
 
     private func refreshAuthorizedFolders() {
         authorizedFolders = BookmarkManager.shared.bookmarkKeys()
+    }
+
+    // MARK: - Permission Management
+    private func checkPermissionStatus() {
+        hasAccessibilityPermission = CGPreflightPostEventAccess()
+    }
+
+    private func openAccessibilitySettings() {
+        // Show reminder alert before opening System Settings
+        let alert = NSAlert()
+        alert.messageText = "Opening System Settings"
+        alert.informativeText = "After granting Accessibility permission, please restart FileRing for the changes to take effect."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+
+        // Open System Settings
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
