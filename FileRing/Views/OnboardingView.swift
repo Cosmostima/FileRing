@@ -12,6 +12,7 @@ struct OnboardingView: View {
     @State private var selectedModifier = "control"
     @State private var selectedKey = "x"
     @State private var authorizedFolders: [String] = []
+    @State private var hasAccessibilityPermission = false
 
     let onComplete: () -> Void
 
@@ -27,7 +28,7 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             // Page indicator
             HStack(spacing: 8) {
-                ForEach(0..<2, id: \.self) { index in
+                ForEach(0..<3, id: \.self) { index in
                     Circle()
                         .fill(index == currentPage ? Color.blue : Color.gray.opacity(0.3))
                         .frame(width: 8, height: 8)
@@ -41,13 +42,20 @@ struct OnboardingView: View {
                     welcomePage
                         .frame(height: 530)
                         .transition(.asymmetric(insertion: .move(edge: .leading), removal: .move(edge: .leading)))
-                } else {
+                } else if currentPage == 1 {
                     setupPage
+                        .frame(height: 530)
+                        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                } else {
+                    permissionPage
                         .frame(height: 530)
                         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing)))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear {
+                checkPermissionStatus()
+            }
 
             // Navigation buttons
             HStack {
@@ -62,7 +70,7 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                if currentPage < 1 {
+                if currentPage < 2 {
                     Button("Next") {
                         withAnimation {
                             currentPage += 1
@@ -74,6 +82,7 @@ struct OnboardingView: View {
                         completeOnboarding()
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(!hasAccessibilityPermission)
                 }
             }
             .padding(.horizontal)
@@ -341,9 +350,140 @@ struct OnboardingView: View {
         authorizedFolders = BookmarkManager.shared.bookmarkKeys()
     }
 
+    // MARK: - Permission Page
+    private var permissionPage: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            // Icon
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(hasAccessibilityPermission ? .green : .orange)
+                .padding(.bottom, 8)
+
+            // Title
+            Text("Accessibility Permission")
+                .font(.system(size: 28, weight: .bold))
+                .multilineTextAlignment(.center)
+
+            if hasAccessibilityPermission {
+                // Permission granted
+                VStack(spacing: 16) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.system(size: 24))
+                        Text("Permission Granted")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.green)
+                    }
+
+                    Text("The app can now run normally.")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
+                .background(Color.green.opacity(0.1))
+                .cornerRadius(12)
+            } else {
+                // Permission needed
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.system(size: 20))
+                        Text("Permission Required")
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+
+                    Text("FileRing needs Accessibility permission to capture global hotkeys.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("To grant permission:")
+                            .font(.system(size: 14, weight: .medium))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("Open System Settings > Privacy & Security > Accessibility", systemImage: "1.circle.fill")
+                            Label("Click the lock icon to unlock (admin password required)", systemImage: "2.circle.fill")
+                            Label("Find FileRing in the list and enable it", systemImage: "3.circle.fill")
+                        }
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Button("Open System Settings") {
+                        openAccessibilitySettings()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+
+                    Divider()
+
+                    VStack(spacing: 8) {
+                        Text("If you just completed authorization, please restart the app to take effect.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Button("Complete & Restart App") {
+                            completeAndRestart()
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(12)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .onChange(of: currentPage) { newPage in
+            if newPage == 2 {
+                checkPermissionStatus()
+            }
+        }
+    }
+
+    // MARK: - Permission Management
+    private func checkPermissionStatus() {
+        hasAccessibilityPermission = CGPreflightPostEventAccess()
+    }
+
+    private func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private func completeOnboarding() {
-        UserDefaults.standard.set(true, forKey: "FileRingHasSeenOnboarding")
+        AppVersion.markOnboardingCompleted()
         onComplete()
+    }
+
+    private func completeAndRestart() {
+        AppVersion.markOnboardingCompleted()
+
+        // Close onboarding window first
+        onComplete()
+
+        // Restart the app
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let url = URL(fileURLWithPath: Bundle.main.resourcePath!)
+            let path = url.deletingLastPathComponent().deletingLastPathComponent().absoluteString
+            let task = Process()
+            task.launchPath = "/usr/bin/open"
+            task.arguments = [path]
+            task.launch()
+
+            // Quit current instance
+            NSApplication.shared.terminate(nil)
+        }
     }
 }
 

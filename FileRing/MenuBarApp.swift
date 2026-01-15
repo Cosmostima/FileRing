@@ -32,17 +32,10 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
             _ = BookmarkManager.shared.loadUrl(withKey: key)
         }
 
-        // Show onboarding for first-time users, or open settings on launch
-        let hasSeenOnboarding = UserDefaults.standard.bool(forKey: "FileRingHasSeenOnboarding")
-        if hasSeenOnboarding {
-            // If user has completed onboarding, automatically open settings on launch
-            // This provides easy access when clicking the app icon or opening from Spotlight
-            // Delay to ensure app is fully initialized
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.openSettings()
-            }
-        } else {
-            showOnboardingIfNeeded()
+        // Show onboarding for first-time users or new versions, or open settings on launch
+        // Delay to ensure app is fully initialized
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.showOnboardingIfNeeded()
         }
 
         // Listen for reset notification from settings
@@ -252,10 +245,12 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
 
     // MARK: - Onboarding Window
     private func showOnboardingIfNeeded() {
-        let hasSeenOnboarding = UserDefaults.standard.bool(forKey: "FileRingHasSeenOnboarding")
-
-        if !hasSeenOnboarding {
+        if AppVersion.shouldShowOnboarding() {
             showOnboardingWindow()
+        } else {
+            // User has completed onboarding, automatically open settings on launch
+            // This provides easy access when clicking the app icon or opening from Spotlight
+            openSettings()
         }
     }
 
@@ -350,7 +345,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "FileRing"
         alert.informativeText = """
-        Version 1.0
+        Version \(AppVersion.current)
 
         Quick access to files and folders.
 
@@ -372,8 +367,8 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
             BookmarkManager.shared.revokeAuthorization(forKey: key)
         }
 
-        // Reset onboarding flag
-        UserDefaults.standard.removeObject(forKey: "FileRingHasSeenOnboarding")
+        // Reset onboarding version
+        AppVersion.completedOnboardingVersion = nil
 
         // Show onboarding
         showOnboardingWindow()

@@ -377,7 +377,7 @@ struct SettingsView: View {
             HStack {
                 Text("Version")
                 Spacer()
-                Text("1.0")
+                Text(AppVersion.current)
                     .foregroundStyle(.secondary)
             }
 
@@ -405,7 +405,7 @@ struct SettingsView: View {
         for key in bookmarkKeys {
             BookmarkManager.shared.revokeAuthorization(forKey: key)
         }
-        UserDefaults.standard.removeObject(forKey: "FileRingHasSeenOnboarding")
+        AppVersion.completedOnboardingVersion = nil
 
         // Reset spotlight config to defaults
         resetSpotlightConfig()
