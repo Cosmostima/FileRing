@@ -1,32 +1,16 @@
 //
 //  AppSpotlightManager.swift
-//  PopUp
+//  FileRing
 //
-//  Application-specific Spotlight query manager using NSMetadataQuery
+//  Application-specific Spotlight query manager, using SpotlightQueryEngine
 //
 
 import Foundation
 import AppKit
 
-private final class AppQueryContext {
-    let query: NSMetadataQuery
-    let continuation: CheckedContinuation<[NSMetadataItem], Error>
-    var timeoutTask: Task<Void, Never>?
-
-    init(query: NSMetadataQuery, continuation: CheckedContinuation<[NSMetadataItem], Error>) {
-        self.query = query
-        self.continuation = continuation
-    }
-}
-
-private final class CancellationToken: @unchecked Sendable {
-    var identifier: ObjectIdentifier?
-}
-
 @MainActor
 class AppSpotlightManager: NSObject {
-    private var activeQueries: [ObjectIdentifier: AppQueryContext] = [:]
-
+    private let engine = SpotlightQueryEngine()
     private let config: SpotlightConfig
 
     init(config: SpotlightConfig) {
@@ -38,164 +22,46 @@ class AppSpotlightManager: NSObject {
 
     /// Query recently used applications - sorted by last used date (newest first)
     func queryRecentlyUsedApps(limit: Int) async throws -> [FileSystemItem] {
-        try await queryApps(
+        let descriptor = buildDescriptor(
             attribute: "kMDItemLastUsedDate",
             daysAgo: -config.recentDays,
-            sortBy: "kMDItemLastUsedDate",
-            limit: limit
+            sortBy: "kMDItemLastUsedDate"
         )
+        let items = try await engine.execute(descriptor)
+        return parseAppItems(from: items, limit: limit)
     }
 
     /// Query frequently used applications - sorted by use count (most used first)
     func queryFrequentlyUsedApps(limit: Int) async throws -> [FileSystemItem] {
-        try await queryApps(
+        let descriptor = buildDescriptor(
             attribute: "kMDItemLastUsedDate",
             daysAgo: -config.frequentDays,
-            sortBy: "kMDItemUseCount",
-            limit: limit
+            sortBy: "kMDItemUseCount"
         )
-    }
-
-    // MARK: - Core Query Logic
-
-    private func queryApps(
-        attribute: String,
-        daysAgo: Int,
-        sortBy: String,
-        limit: Int
-    ) async throws -> [FileSystemItem] {
-        // ascending: false = descending order (newest/most used first)
-        let items = try await performAppQuery(
-            attribute: attribute,
-            daysAgo: daysAgo,
-            sortBy: sortBy,
-            ascending: false
-        )
-
+        let items = try await engine.execute(descriptor)
         return parseAppItems(from: items, limit: limit)
     }
 
-    private func performAppQuery(
-        attribute: String,
-        daysAgo: Int,
-        sortBy: String,
-        ascending: Bool
-    ) async throws -> [NSMetadataItem] {
-        let cancellationToken = CancellationToken()
+    // MARK: - Descriptor Building
 
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                let query = NSMetadataQuery()
-                let identifier = ObjectIdentifier(query)
+    private func buildDescriptor(attribute: String, daysAgo: Int, sortBy: String) -> SpotlightQueryDescriptor {
+        let startDate = Calendar.current.dateWithFallback(byAdding: .day, value: daysAgo, to: Date())
+        var predicates: [NSPredicate] = [
+            NSPredicate(format: "kMDItemContentType == %@", "com.apple.application-bundle"),
+            NSPredicate(format: "\(attribute) >= %@", startDate as NSDate)
+        ]
 
-                let context = AppQueryContext(query: query, continuation: continuation)
-                activeQueries[identifier] = context
-                cancellationToken.identifier = identifier
-
-                // Set search scope - ALWAYS search entire system for apps
-                // (Applications are typically in /Applications which is outside user home)
-                query.searchScopes = [NSMetadataQueryLocalComputerScope]
-
-                // Build predicate for applications
-                let startDate = Calendar.current.date(byAdding: .day, value: daysAgo, to: Date())!
-                var predicates: [NSPredicate] = [
-                    NSPredicate(format: "kMDItemContentType == %@", "com.apple.application-bundle"),
-                    NSPredicate(format: "\(attribute) >= %@", startDate as NSDate)
-                ]
-
-                // Optional: Exclude system applications
-                if config.excludeSystemApps {
-                    predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/System"))
-                    predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/Library"))
-                }
-
-                query.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-
-                // Set sort descriptors
-                query.sortDescriptors = [NSSortDescriptor(key: sortBy, ascending: ascending)]
-
-                // Register notifications
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(queryDidFinishGathering),
-                    name: .NSMetadataQueryDidFinishGathering,
-                    object: query
-                )
-
-                // Start query
-                query.start()
-
-                // Setup timeout
-                let timeoutSeconds = config.queryTimeoutSeconds
-                context.timeoutTask = Task { [weak self, weak query] in
-                    guard let query = query else { return }
-                    guard let self = self else { return }
-                    do {
-                        try await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
-                        if Task.isCancelled { return }
-                        await self.handleTimeout(for: query)
-                    } catch {
-                        // Task cancelled, ignore
-                    }
-                }
-            }
-        } onCancel: {
-            Task { @MainActor in
-                guard let id = cancellationToken.identifier else { return }
-                self.cancelQuery(with: id, error: CancellationError())
-            }
-        }
-    }
-
-    @objc private func queryDidFinishGathering(_ notification: Notification) {
-        guard let query = notification.object as? NSMetadataQuery else {
-            return
+        if config.excludeSystemApps {
+            predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/System"))
+            predicates.append(NSPredicate(format: "NOT kMDItemPath BEGINSWITH %@", "/Library"))
         }
 
-        let identifier = ObjectIdentifier(query)
-        guard let context = activeQueries.removeValue(forKey: identifier) else {
-            return
-        }
-
-        context.timeoutTask?.cancel()
-
-        query.disableUpdates()
-
-        var items: [NSMetadataItem] = []
-        for i in 0..<query.resultCount {
-            if let item = query.result(at: i) as? NSMetadataItem {
-                items.append(item)
-            }
-        }
-
-        query.stop()
-        NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
-
-        context.continuation.resume(returning: items)
-    }
-
-    private func handleTimeout(for query: NSMetadataQuery) async {
-        cancelQuery(for: query, error: SpotlightError.timeout)
-    }
-
-    private func cancelQuery(for query: NSMetadataQuery, error: Error) {
-        cancelQuery(with: ObjectIdentifier(query), error: error)
-    }
-
-    private func cancelQuery(with identifier: ObjectIdentifier, error: Error) {
-        guard let context = activeQueries.removeValue(forKey: identifier) else {
-            return
-        }
-
-        context.timeoutTask?.cancel()
-
-        let query = context.query
-        query.disableUpdates()
-        query.stop()
-
-        NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
-
-        context.continuation.resume(throwing: error)
+        return SpotlightQueryDescriptor(
+            searchScopes: [NSMetadataQueryLocalComputerScope],
+            predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates),
+            sortDescriptors: [NSSortDescriptor(key: sortBy, ascending: false)],
+            timeoutSeconds: config.queryTimeoutSeconds
+        )
     }
 
     // MARK: - Result Parsing
@@ -203,21 +69,14 @@ class AppSpotlightManager: NSObject {
     private func parseAppItems(from items: [NSMetadataItem], limit: Int) -> [FileSystemItem] {
         var results: [FileSystemItem] = []
         let homeDir = NSHomeDirectory()
+
         for item in items {
             guard let path = item.value(forAttribute: NSMetadataItemPathKey) as? String else {
                 continue
             }
-            // IMPORTANT: Do NOT check authorized paths for applications!
-            // Applications in /Applications, /System/Applications are publicly readable
-            // and don't require security-scoped bookmark authorization.
-            // The security-scoped bookmark system has known issues with /Applications folder.
 
-            // Only apply exclusion filter (for DerivedData, build artifacts, etc.)
-            if config.isPathExcluded(path, homeDir: homeDir) {
-                continue
-            }
+            if config.isPathExcluded(path, homeDir: homeDir) { continue }
 
-            // Extract metadata
             let fsName = item.value(forAttribute: "kMDItemFSName") as? String ?? ""
             let displayName = item.value(forAttribute: "kMDItemDisplayName") as? String
                 ?? fsName.replacingOccurrences(of: ".app", with: "")
@@ -238,30 +97,13 @@ class AppSpotlightManager: NSObject {
                 useCount: useCount
             ))
 
-            if results.count >= limit {
-                break
-            }
+            if results.count >= limit { break }
         }
 
         return results
     }
 
     private func formatDate(_ date: Date) -> String {
-        // Format: "2025-10-31 07:29:56 +0000"
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
-        return formatter.string(from: date)
-    }
-
-    @MainActor deinit {
-        for (_, context) in activeQueries {
-            context.timeoutTask?.cancel()
-            context.query.stop()
-            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: context.query)
-            context.continuation.resume(throwing: SpotlightError.queryFailed("Deinit before completion"))
-        }
-        activeQueries.removeAll()
-        NotificationCenter.default.removeObserver(self)
+        DateFormatter.spotlightDateFormatter.string(from: date)
     }
 }

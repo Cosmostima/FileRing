@@ -1,13 +1,13 @@
 //
 //  HotkeyCaptureField.swift
-//  PopUp
+//  FileRing
 //
 //  SwiftUI bridge for capturing keyboard shortcuts (modifier-only or modifier+key)
 //
 
 import SwiftUI
 import AppKit
-import Carbon
+import Carbon.HIToolbox
 
 struct HotkeyCaptureField: NSViewRepresentable {
     @Binding var modifierSetting: String
@@ -433,12 +433,7 @@ struct HotkeyCaptureField: NSViewRepresentable {
         }
 
         private func modifierSymbolsFromFlags(_ flags: NSEvent.ModifierFlags) -> [String] {
-            var symbols: [String] = []
-            if flags.contains(.control) { symbols.append("⌃") }
-            if flags.contains(.option) { symbols.append("⌥") }
-            if flags.contains(.shift) { symbols.append("⇧") }
-            if flags.contains(.command) { symbols.append("⌘") }
-            return symbols
+            KeyCodeMapping.modifierSymbols(from: flags)
         }
 
         // MARK: - Helpers
@@ -452,96 +447,23 @@ struct HotkeyCaptureField: NSViewRepresentable {
         }
 
         private func modifierString(from flags: NSEvent.ModifierFlags) -> String {
-            var parts: [String] = []
-            if flags.contains(.command) { parts.append("command") }
-            if flags.contains(.control) { parts.append("control") }
-            if flags.contains(.option) { parts.append("option") }
-            if flags.contains(.shift) { parts.append("shift") }
-            return parts.joined(separator: "+")
+            KeyCodeMapping.modifierString(from: flags)
         }
 
         private func modifierSettingParts(from setting: String) -> [String] {
-            guard !setting.isEmpty, setting != "none" else { return [] }
-            return setting.split(separator: "+").map { String($0) }
+            KeyCodeMapping.modifierSettingParts(from: setting)
         }
 
         private func symbol(for modifier: String) -> String {
-            switch modifier {
-            case "command": return "⌘"
-            case "control": return "⌃"
-            case "option", "alt": return "⌥"
-            case "shift": return "⇧"
-            default: return modifier.capitalized
-            }
+            KeyCodeMapping.modifierSymbol(for: modifier)
         }
 
         private func keyDescription(for key: String) -> String {
-            switch key.lowercased() {
-            case "", " ":
-                return ""
-            case "space":
-                return "Space"
-            case "escape", "esc":
-                return "Esc"
-            default:
-                return key.uppercased()
-            }
+            KeyCodeMapping.keyDescription(for: key)
         }
 
         private func keyString(from event: NSEvent) -> String? {
-            // First try to get characters ignoring modifiers
-            if let characters = event.charactersIgnoringModifiers,
-               !characters.isEmpty {
-                let char = characters.lowercased()
-                // Accept letters and numbers
-                if char.range(of: "^[a-z0-9]$", options: .regularExpression) != nil {
-                    return char
-                }
-            }
-
-            // Fall back to key code mapping
-            switch event.keyCode {
-            case UInt16(kVK_ANSI_A): return "a"
-            case UInt16(kVK_ANSI_B): return "b"
-            case UInt16(kVK_ANSI_C): return "c"
-            case UInt16(kVK_ANSI_D): return "d"
-            case UInt16(kVK_ANSI_E): return "e"
-            case UInt16(kVK_ANSI_F): return "f"
-            case UInt16(kVK_ANSI_G): return "g"
-            case UInt16(kVK_ANSI_H): return "h"
-            case UInt16(kVK_ANSI_I): return "i"
-            case UInt16(kVK_ANSI_J): return "j"
-            case UInt16(kVK_ANSI_K): return "k"
-            case UInt16(kVK_ANSI_L): return "l"
-            case UInt16(kVK_ANSI_M): return "m"
-            case UInt16(kVK_ANSI_N): return "n"
-            case UInt16(kVK_ANSI_O): return "o"
-            case UInt16(kVK_ANSI_P): return "p"
-            case UInt16(kVK_ANSI_Q): return "q"
-            case UInt16(kVK_ANSI_R): return "r"
-            case UInt16(kVK_ANSI_S): return "s"
-            case UInt16(kVK_ANSI_T): return "t"
-            case UInt16(kVK_ANSI_U): return "u"
-            case UInt16(kVK_ANSI_V): return "v"
-            case UInt16(kVK_ANSI_W): return "w"
-            case UInt16(kVK_ANSI_X): return "x"
-            case UInt16(kVK_ANSI_Y): return "y"
-            case UInt16(kVK_ANSI_Z): return "z"
-            case UInt16(kVK_ANSI_0): return "0"
-            case UInt16(kVK_ANSI_1): return "1"
-            case UInt16(kVK_ANSI_2): return "2"
-            case UInt16(kVK_ANSI_3): return "3"
-            case UInt16(kVK_ANSI_4): return "4"
-            case UInt16(kVK_ANSI_5): return "5"
-            case UInt16(kVK_ANSI_6): return "6"
-            case UInt16(kVK_ANSI_7): return "7"
-            case UInt16(kVK_ANSI_8): return "8"
-            case UInt16(kVK_ANSI_9): return "9"
-            case UInt16(kVK_Space): return "space"
-            case UInt16(kVK_Escape): return "escape"
-            default:
-                return nil
-            }
+            KeyCodeMapping.keyString(from: event)
         }
     }
 }

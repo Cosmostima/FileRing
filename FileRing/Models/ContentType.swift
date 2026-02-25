@@ -1,6 +1,6 @@
 //
 //  ContentType.swift
-//  PopUp
+//  FileRing
 //
 //  Created by Claude on 30/10/2025.
 //

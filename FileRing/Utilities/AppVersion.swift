@@ -10,7 +10,7 @@ import Foundation
 struct AppVersion {
     /// Current app version read from Bundle
     static var current: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.6"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.7"
     }
 
     /// Version when user completed onboarding (nil if never completed)

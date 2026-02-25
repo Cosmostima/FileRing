@@ -1,6 +1,6 @@
 //
 //  SpotlightConfig.swift
-//  PopUp
+//  FileRing
 //
 //  Configuration for Spotlight queries with filtering support
 //
@@ -68,108 +68,30 @@ struct SpotlightConfig: Codable {
     /// Query timeout in seconds
     var queryTimeoutSeconds: Int = 10
 
-    // MARK: - UserDefaults Keys
+    // MARK: - Storage Key
 
-    private static let excludedFoldersKey = "FileRingExcludedFolders"
-    private static let excludedExtensionsKey = "FileRingExcludedExtensions"
-    private static let recentDaysKey = "FileRingRecentDays"
-    private static let frequentDaysKey = "FileRingFrequentDays"
-    private static let searchOnlyUserHomeKey = "FileRingSearchOnlyUserHome"
-    private static let enableAppSearchKey = "FileRingEnableAppSearch"
-    private static let excludeSystemAppsKey = "FileRingExcludeSystemApps"
-    private static let appFrequencyMultiplierKey = "FileRingAppFrequencyMultiplier"
-    private static let cacheSecondsKey = "FileRingCacheSeconds"
-    private static let queryTimeoutSecondsKey = "FileRingQueryTimeoutSeconds"
+    private static let storageKey = "FileRingSpotlightConfig"
 
     // MARK: - Loading & Saving
 
     /// Load configuration from UserDefaults, or return default if not found
     static func load() -> SpotlightConfig {
-        let defaults = UserDefaults.standard
-
-        var config = SpotlightConfig()
-
-        // Load arrays if they exist
-        if let folders = defaults.array(forKey: excludedFoldersKey) as? [String] {
-            config.excludedFolders = folders
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let config = try? JSONDecoder().decode(SpotlightConfig.self, from: data) else {
+            return SpotlightConfig()
         }
-
-        if let extensions = defaults.array(forKey: excludedExtensionsKey) as? [String] {
-            config.excludedExtensions = extensions
-        }
-
-        // Load integers if they exist (check if > 0 to distinguish from unset)
-        let recentDays = defaults.integer(forKey: recentDaysKey)
-        if recentDays > 0 {
-            config.recentDays = recentDays
-        }
-
-        let frequentDays = defaults.integer(forKey: frequentDaysKey)
-        if frequentDays > 0 {
-            config.frequentDays = frequentDays
-        }
-
-        let cacheSeconds = defaults.integer(forKey: cacheSecondsKey)
-        if cacheSeconds > 0 {
-            config.cacheSeconds = cacheSeconds
-        }
-
-        let queryTimeout = defaults.integer(forKey: queryTimeoutSecondsKey)
-        if queryTimeout > 0 {
-            config.queryTimeoutSeconds = queryTimeout
-        }
-
-        // Load booleans if they exist
-        if defaults.object(forKey: searchOnlyUserHomeKey) != nil {
-            config.searchOnlyUserHome = defaults.bool(forKey: searchOnlyUserHomeKey)
-        }
-
-        if defaults.object(forKey: enableAppSearchKey) != nil {
-            config.enableAppSearch = defaults.bool(forKey: enableAppSearchKey)
-        }
-
-        if defaults.object(forKey: excludeSystemAppsKey) != nil {
-            config.excludeSystemApps = defaults.bool(forKey: excludeSystemAppsKey)
-        }
-
-        // Load double if it exists
-        if defaults.object(forKey: appFrequencyMultiplierKey) != nil {
-            config.appFrequencyMultiplier = defaults.double(forKey: appFrequencyMultiplierKey)
-        }
-
         return config
     }
 
     /// Save configuration to UserDefaults
     func save() throws {
-        let defaults = UserDefaults.standard
-
-        defaults.set(excludedFolders, forKey: Self.excludedFoldersKey)
-        defaults.set(excludedExtensions, forKey: Self.excludedExtensionsKey)
-        defaults.set(recentDays, forKey: Self.recentDaysKey)
-        defaults.set(frequentDays, forKey: Self.frequentDaysKey)
-        defaults.set(searchOnlyUserHome, forKey: Self.searchOnlyUserHomeKey)
-        defaults.set(enableAppSearch, forKey: Self.enableAppSearchKey)
-        defaults.set(excludeSystemApps, forKey: Self.excludeSystemAppsKey)
-        defaults.set(appFrequencyMultiplier, forKey: Self.appFrequencyMultiplierKey)
-        defaults.set(cacheSeconds, forKey: Self.cacheSecondsKey)
-        defaults.set(queryTimeoutSeconds, forKey: Self.queryTimeoutSecondsKey)
+        let data = try JSONEncoder().encode(self)
+        UserDefaults.standard.set(data, forKey: Self.storageKey)
     }
 
     /// Reset configuration to defaults
     static func reset() {
-        let defaults = UserDefaults.standard
-
-        defaults.removeObject(forKey: excludedFoldersKey)
-        defaults.removeObject(forKey: excludedExtensionsKey)
-        defaults.removeObject(forKey: recentDaysKey)
-        defaults.removeObject(forKey: frequentDaysKey)
-        defaults.removeObject(forKey: searchOnlyUserHomeKey)
-        defaults.removeObject(forKey: enableAppSearchKey)
-        defaults.removeObject(forKey: excludeSystemAppsKey)
-        defaults.removeObject(forKey: appFrequencyMultiplierKey)
-        defaults.removeObject(forKey: cacheSecondsKey)
-        defaults.removeObject(forKey: queryTimeoutSecondsKey)
+        UserDefaults.standard.removeObject(forKey: storageKey)
     }
 
     // MARK: - Filtering Helpers

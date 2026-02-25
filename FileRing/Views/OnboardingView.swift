@@ -6,6 +6,8 @@
 //
 
 import SwiftUI
+import Combine
+import os.log
 
 struct OnboardingView: View {
     @State private var currentPage = 0
@@ -13,14 +15,17 @@ struct OnboardingView: View {
     @State private var selectedKey = "x"
     @State private var authorizedFolders: [String] = []
     @State private var hasAccessibilityPermission = false
+    @State private var showBookmarkError = false
+    @State private var bookmarkErrorMessage = ""
+    @State private var accessibilityObserver: (any NSObjectProtocol)?
 
     let onComplete: () -> Void
 
     init(onComplete: @escaping () -> Void) {
         self.onComplete = onComplete
         // Initialize state values after the struct is created
-        _selectedModifier = State(initialValue: UserDefaults.standard.string(forKey: "FileRingModifierKey") ?? "control")
-        _selectedKey = State(initialValue: UserDefaults.standard.string(forKey: "FileRingKeyEquivalent") ?? "x")
+        _selectedModifier = State(initialValue: UserDefaults.standard.string(forKey: UserDefaultsKeys.modifierKey) ?? "control")
+        _selectedKey = State(initialValue: UserDefaults.standard.string(forKey: UserDefaultsKeys.keyEquivalent) ?? "x")
         _authorizedFolders = State(initialValue: BookmarkManager.shared.bookmarkKeys())
     }
 
@@ -56,6 +61,26 @@ struct OnboardingView: View {
             .onAppear {
                 checkPermissionStatus()
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                guard currentPage == 2, !hasAccessibilityPermission else { return }
+                if AccessibilityHelper.checkPermission() {
+                    hasAccessibilityPermission = true
+                    stopObservingPermission()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        completeAndRestart()
+                    }
+                }
+            }
+            .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+                guard currentPage == 2, !hasAccessibilityPermission else { return }
+                if AccessibilityHelper.checkPermission() {
+                    hasAccessibilityPermission = true
+                    stopObservingPermission()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        completeAndRestart()
+                    }
+                }
+            }
 
             // Navigation buttons
             HStack {
@@ -89,6 +114,11 @@ struct OnboardingView: View {
             .padding(.bottom)
         }
         .frame(width: 700, height: 600)
+        .alert("Folder Authorization Error", isPresented: $showBookmarkError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(bookmarkErrorMessage)
+        }
     }
 
     // MARK: - Welcome Page
@@ -167,12 +197,12 @@ struct OnboardingView: View {
                         keySetting: $selectedKey
                     ) { newModifier, newKey in
                         let defaults = UserDefaults.standard
-                        defaults.set(newModifier, forKey: "FileRingModifierKey")
-                        defaults.set(newKey, forKey: "FileRingKeyEquivalent")
+                        defaults.set(newModifier, forKey: UserDefaultsKeys.modifierKey)
+                        defaults.set(newKey, forKey: UserDefaultsKeys.keyEquivalent)
 
                         // Auto-detect mode based on whether key is provided
                         let newMode = newKey.isEmpty ? "modifier_only" : "combination"
-                        defaults.set(newMode, forKey: "FileRingHotkeyMode")
+                        defaults.set(newMode, forKey: UserDefaultsKeys.hotkeyMode)
 
                         NotificationCenter.default.post(name: .hotkeySettingChanged, object: nil)
                     }
@@ -247,103 +277,19 @@ struct OnboardingView: View {
         }
     }
 
-    @ViewBuilder
     private func folderPermissionRow(title: String, icon: String, key: String, folder: FileManager.SearchPathDirectory?) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .foregroundStyle(key == "iCloudDrive" ? .blue : .secondary)
-                .frame(width: 20)
-            Text(title)
-                .font(.system(size: 14))
-            Spacer()
-            if BookmarkManager.shared.isAuthorized(forKey: key) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.system(size: 16))
-            } else {
-                Button("Authorize") {
-                    if key == "iCloudDrive" {
-                        selectICloudDrive()
-                    } else if let folder = folder {
-                        selectFolder(key: key, defaultDirectory: folder)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    // MARK: - Folder Selection
-    private func selectICloudDrive() {
-        let openPanel = NSOpenPanel()
-        openPanel.message = "Select iCloud Drive folder to grant access"
-        openPanel.prompt = "Select"
-        openPanel.canChooseFiles = false
-        openPanel.canChooseDirectories = true
-        openPanel.canCreateDirectories = false
-        openPanel.allowsMultipleSelection = false
-        openPanel.showsHiddenFiles = true
-
-        if let homeURL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first {
-            let mobileDocsURL = homeURL.appendingPathComponent("Mobile Documents")
-            openPanel.directoryURL = mobileDocsURL
-        }
-
-        openPanel.begin { response in
-            if response == .OK, let url = openPanel.url {
-                BookmarkManager.shared.saveBookmark(for: url, withKey: "iCloudDrive")
-                refreshAuthorizedFolders()
-            }
-        }
-    }
-
-    private func selectFolder(key: String, defaultDirectory: FileManager.SearchPathDirectory) {
-        let openPanel = NSOpenPanel()
-        openPanel.message = "Select \(key) folder to grant access"
-        openPanel.prompt = "Select"
-        openPanel.canChooseFiles = false
-        openPanel.canChooseDirectories = true
-        openPanel.canCreateDirectories = false
-        openPanel.allowsMultipleSelection = false
-
-        if let defaultURL = FileManager.default.urls(for: defaultDirectory, in: .userDomainMask).first {
-            openPanel.directoryURL = defaultURL
-        }
-
-        openPanel.begin { response in
-            if response == .OK, let url = openPanel.url {
-                BookmarkManager.shared.saveBookmark(for: url, withKey: key)
-                refreshAuthorizedFolders()
-            }
-        }
+        FolderPermissionRow(
+            title: title, icon: icon, key: key, folder: folder,
+            onError: { msg in bookmarkErrorMessage = msg; showBookmarkError = true },
+            onSuccess: { refreshAuthorizedFolders() }
+        )
     }
 
     private func addCustomFolder() {
-        let openPanel = NSOpenPanel()
-        openPanel.message = "Select a folder to authorize"
-        openPanel.prompt = "Authorize"
-        openPanel.canChooseFiles = false
-        openPanel.canChooseDirectories = true
-        openPanel.canCreateDirectories = false
-        openPanel.allowsMultipleSelection = false
-
-        openPanel.begin { response in
-            if response == .OK, let url = openPanel.url {
-                let folderName = url.lastPathComponent
-                var key = "Custom_\(folderName)"
-                var counter = 1
-
-                while BookmarkManager.shared.isAuthorized(forKey: key) {
-                    counter += 1
-                    key = "Custom_\(folderName)_\(counter)"
-                }
-
-                BookmarkManager.shared.saveBookmark(for: url, withKey: key)
-                refreshAuthorizedFolders()
-            }
-        }
+        FolderAuthorizationHelper.addCustomFolder(
+            onError: { msg in bookmarkErrorMessage = msg; showBookmarkError = true },
+            onSuccess: { refreshAuthorizedFolders() }
+        )
     }
 
     private func refreshAuthorizedFolders() {
@@ -446,19 +392,30 @@ struct OnboardingView: View {
         .onChange(of: currentPage) { newPage in
             if newPage == 2 {
                 checkPermissionStatus()
+            } else {
+                stopObservingPermission()
             }
         }
     }
 
     // MARK: - Permission Management
+
     private func checkPermissionStatus() {
-        hasAccessibilityPermission = CGPreflightPostEventAccess()
+        hasAccessibilityPermission = AccessibilityHelper.checkPermission()
+    }
+
+    private func stopObservingPermission() {
+        if let observer = accessibilityObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            accessibilityObserver = nil
+        }
     }
 
     private func openAccessibilitySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
+        // Call with prompt=true to register the app in the Accessibility list,
+        // then open Settings so the user can enable the toggle.
+        _ = AccessibilityHelper.requestPermission()
+        AccessibilityHelper.openSystemSettings()
     }
 
     private func completeOnboarding() {
@@ -468,21 +425,10 @@ struct OnboardingView: View {
 
     private func completeAndRestart() {
         AppVersion.markOnboardingCompleted()
-
-        // Close onboarding window first
         onComplete()
 
-        // Restart the app
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let url = URL(fileURLWithPath: Bundle.main.resourcePath!)
-            let path = url.deletingLastPathComponent().deletingLastPathComponent().absoluteString
-            let task = Process()
-            task.launchPath = "/usr/bin/open"
-            task.arguments = [path]
-            task.launch()
-
-            // Quit current instance
-            NSApplication.shared.terminate(nil)
+            AccessibilityHelper.restartApp()
         }
     }
 }

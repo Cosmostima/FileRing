@@ -1,6 +1,6 @@
 //
 //  DoubleRingItemsListView.swift
-//  PopUp
+//  FileRing
 //
 //  Created by Cosmos on 30/10/2025.
 //

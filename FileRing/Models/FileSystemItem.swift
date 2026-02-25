@@ -1,6 +1,6 @@
 //
 //  FileSystemItem.swift
-//  PopUp
+//  FileRing
 //
 //  Created by Claude on 30/10/2025.
 //
@@ -91,7 +91,3 @@ struct FileSystemItem: Codable, Identifiable, Sendable {
         value.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil
     }
 }
-
-// MARK: - Type Aliases for backward compatibility
-typealias FileItem = FileSystemItem
-typealias FolderItem = FileSystemItem

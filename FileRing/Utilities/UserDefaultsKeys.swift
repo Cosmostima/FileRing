@@ -13,5 +13,8 @@ enum UserDefaultsKeys {
     static let keyEquivalent = "FileRingKeyEquivalent"
     static let itemsPerSection = "FileRingItemsPerSection"
     static let hideDockIcon = "FileRingHideDockIcon"
+    static let hideStatusBarIcon = "FileRingHideStatusBarIcon"
     static let onboardingCompletedVersion = "FileRingOnboardingCompletedVersion"
+    static let authorizedFolderPaths = "FileRingAuthorizedFolderPaths"
+    static let managedBookmarkKeys = "FileRingManagedBookmarkKeys"
 }

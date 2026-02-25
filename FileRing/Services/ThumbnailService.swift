@@ -1,6 +1,6 @@
 //
 //  ThumbnailService.swift
-//  PopUp
+//  FileRing
 //
 //  Created by Claude on 07/11/2025.
 //

@@ -1,6 +1,6 @@
 //
 //  FileSystemService.swift
-//  PopUp
+//  FileRing
 //
 //  Spotlight-based file system service (no caching - fresh data on every panel open)
 //
@@ -44,7 +44,7 @@ class FileSystemService {
     }
 
     // MARK: - File Operations
-    func fetchRecentlyOpenedFiles(limit: Int = 10) async throws -> [FileItem] {
+    func fetchRecentlyOpenedFiles(limit: Int = 10) async throws -> [FileSystemItem] {
         let signpostID = OSSignpostID(log: .pointsOfInterest)
         os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentFiles", signpostID: signpostID)
         defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentFiles", signpostID: signpostID) }
@@ -58,7 +58,7 @@ class FileSystemService {
         return try await appSearchService.fetchRecentItemsWithApps(totalLimit: limit)
     }
 
-    func fetchRecentlySavedFiles(limit: Int = 10) async throws -> [FileItem] {
+    func fetchRecentlySavedFiles(limit: Int = 10) async throws -> [FileSystemItem] {
         let signpostID = OSSignpostID(log: .pointsOfInterest)
         os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentSavedFiles", signpostID: signpostID)
         defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentSavedFiles", signpostID: signpostID) }
@@ -67,7 +67,7 @@ class FileSystemService {
         return try await spotlight.queryRecentlySavedFiles(limit: limit)
     }
 
-    func fetchFrequentlyOpenedFiles(limit: Int = 10) async throws -> [FileItem] {
+    func fetchFrequentlyOpenedFiles(limit: Int = 10) async throws -> [FileSystemItem] {
         let signpostID = OSSignpostID(log: .pointsOfInterest)
         os_signpost(.begin, log: .pointsOfInterest, name: "FetchFrequentFiles", signpostID: signpostID)
         defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchFrequentFiles", signpostID: signpostID) }
@@ -82,7 +82,7 @@ class FileSystemService {
     }
 
     // MARK: - Folder Operations
-    func fetchRecentlyOpenedFolders(limit: Int = 10) async throws -> [FolderItem] {
+    func fetchRecentlyOpenedFolders(limit: Int = 10) async throws -> [FileSystemItem] {
         let signpostID = OSSignpostID(log: .pointsOfInterest)
         os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentFolders", signpostID: signpostID)
         defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentFolders", signpostID: signpostID) }
@@ -90,7 +90,7 @@ class FileSystemService {
         return try await spotlight.queryRecentlyOpenedFolders(limit: limit)
     }
 
-    func fetchRecentlyModifiedFolders(limit: Int = 10) async throws -> [FolderItem] {
+    func fetchRecentlyModifiedFolders(limit: Int = 10) async throws -> [FileSystemItem] {
         let signpostID = OSSignpostID(log: .pointsOfInterest)
         os_signpost(.begin, log: .pointsOfInterest, name: "FetchRecentModifiedFolders", signpostID: signpostID)
         defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchRecentModifiedFolders", signpostID: signpostID) }
@@ -98,7 +98,7 @@ class FileSystemService {
         return try await spotlight.queryRecentlyModifiedFolders(limit: limit)
     }
 
-    func fetchFrequentlyOpenedFolders(limit: Int = 10) async throws -> [FolderItem] {
+    func fetchFrequentlyOpenedFolders(limit: Int = 10) async throws -> [FileSystemItem] {
         let signpostID = OSSignpostID(log: .pointsOfInterest)
         os_signpost(.begin, log: .pointsOfInterest, name: "FetchFrequentFolders", signpostID: signpostID)
         defer { os_signpost(.end, log: .pointsOfInterest, name: "FetchFrequentFolders", signpostID: signpostID) }
@@ -108,7 +108,7 @@ class FileSystemService {
 
     // MARK: - Open File/Folder
     func open(path: String) async throws {
-        try spotlight.openFile(at: path)
+        try await spotlight.openFile(at: path)
     }
 
     func copyToClipboard(path: String, mode: ClipboardMode) async throws {
@@ -116,7 +116,7 @@ class FileSystemService {
     }
 
     // MARK: - Helper Methods
-    func fetchFiles(for category: CategoryType, limit: Int = 10) async throws -> [FileItem] {
+    func fetchFiles(for category: CategoryType, limit: Int = 10) async throws -> [FileSystemItem] {
         switch category {
         case .recentlyOpened:
             return try await fetchRecentlyOpenedFiles(limit: limit)
@@ -127,7 +127,7 @@ class FileSystemService {
         }
     }
 
-    func fetchFolders(for category: CategoryType, limit: Int = 10) async throws -> [FolderItem] {
+    func fetchFolders(for category: CategoryType, limit: Int = 10) async throws -> [FileSystemItem] {
         switch category {
         case .recentlyOpened:
             return try await fetchRecentlyOpenedFolders(limit: limit)

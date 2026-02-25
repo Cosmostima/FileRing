@@ -1,12 +1,13 @@
 //
 //  MenuBarApp.swift
-//  PopUp
+//  FileRing
 //
 //  Created by Cosmos on 30/10/2025.
 //
 
 import SwiftUI
 import AppKit
+import os.log
 
 class MenuBarApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
@@ -16,6 +17,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
     private var hostingView: NSHostingView<DoubleRingPanelView>?
     private var eventTapManager: EventTapManager?
+    private var accessibilityObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ensureDefaultHotkeySettings()
@@ -26,10 +28,13 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         setupPopupPanel()
         setupEscapeKeyMonitor()
 
-        // Load bookmarks
+        // Preload bookmarks for faster access
+        // Note: Resources are now lazily loaded on demand by the resource pool
+        // This ensures they're available but not leaked
         let allBookmarkKeys = BookmarkManager.shared.bookmarkKeys()
         for key in allBookmarkKeys {
-            _ = BookmarkManager.shared.loadUrl(withKey: key)
+            // Just check authorization to preload resources into the pool
+            _ = BookmarkManager.shared.isAuthorized(forKey: key)
         }
 
         // Show onboarding for first-time users or new versions, or open settings on launch
@@ -65,22 +70,22 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
 
     private func ensureDefaultHotkeySettings() {
         let defaults = UserDefaults.standard
-        if defaults.string(forKey: "FileRingHotkeyMode") == nil {
-            defaults.set("combination", forKey: "FileRingHotkeyMode")
+        if defaults.string(forKey: UserDefaultsKeys.hotkeyMode) == nil {
+            defaults.set("combination", forKey: UserDefaultsKeys.hotkeyMode)
         }
-        if defaults.string(forKey: "FileRingModifierKey") == nil {
-            defaults.set("control", forKey: "FileRingModifierKey")
+        if defaults.string(forKey: UserDefaultsKeys.modifierKey) == nil {
+            defaults.set("control", forKey: UserDefaultsKeys.modifierKey)
         }
-        if defaults.string(forKey: "FileRingKeyEquivalent") == nil {
-            defaults.set("x", forKey: "FileRingKeyEquivalent")
+        if defaults.string(forKey: UserDefaultsKeys.keyEquivalent) == nil {
+            defaults.set("x", forKey: UserDefaultsKeys.keyEquivalent)
         }
-        if defaults.integer(forKey: "FileRingItemsPerSection") == 0 {
-            defaults.set(6, forKey: "FileRingItemsPerSection")
+        if defaults.integer(forKey: UserDefaultsKeys.itemsPerSection) == 0 {
+            defaults.set(6, forKey: UserDefaultsKeys.itemsPerSection)
         }
     }
 
     private func applyDockIconVisibility() {
-        let hideDockIcon = UserDefaults.standard.bool(forKey: "FileRingHideDockIcon")
+        let hideDockIcon = UserDefaults.standard.bool(forKey: UserDefaultsKeys.hideDockIcon)
 
         if hideDockIcon {
             // Hide dock icon - app becomes accessory (status bar only)
@@ -92,7 +97,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func applyStatusBarIconVisibility() {
-        let hideStatusBarIcon = UserDefaults.standard.bool(forKey: "FileRingHideStatusBarIcon")
+        let hideStatusBarIcon = UserDefaults.standard.bool(forKey: UserDefaultsKeys.hideStatusBarIcon)
 
         if hideStatusBarIcon {
             // Hide status bar icon
@@ -126,14 +131,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         if manager.checkPermission() {
             manager.updateRegistration()
         } else {
-            Task {
-                let granted = await manager.requestPermission()
-                if granted {
-                    manager.updateRegistration()
-                } else {
-                    showAccessibilityPermissionGuide()
-                }
-            }
+            showAccessibilityPermissionGuide()
         }
     }
 
@@ -152,8 +150,6 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
                 // Fallback to SF Symbol
                 button.image = NSImage(systemSymbolName: "circle.grid.2x2.fill", accessibilityDescription: "FileRing")
             }
-            button.action = #selector(statusBarButtonClicked)
-            button.target = self
         }
 
         let menu = NSMenu()
@@ -163,10 +159,6 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
-    }
-
-    @objc private func statusBarButtonClicked() {
-        // Menu shown automatically
     }
 
     // MARK: - Popup Panel
@@ -338,8 +330,8 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
 
     // MARK: - About
     @objc private func showAbout() {
-        let modifierKey = UserDefaults.standard.string(forKey: "FileRingModifierKey") ?? "option"
-        let key = UserDefaults.standard.string(forKey: "FileRingKeyEquivalent") ?? "x"
+        let modifierKey = UserDefaults.standard.string(forKey: UserDefaultsKeys.modifierKey) ?? "option"
+        let key = UserDefaults.standard.string(forKey: UserDefaultsKeys.keyEquivalent) ?? "x"
         let comboDescription = formattedHotkeyDescription(modifierKey: modifierKey, key: key)
 
         let alert = NSAlert()
@@ -364,7 +356,11 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         // Delete all authorizations
         let bookmarkKeys = BookmarkManager.shared.bookmarkKeys()
         for key in bookmarkKeys {
-            BookmarkManager.shared.revokeAuthorization(forKey: key)
+            do {
+                try BookmarkManager.shared.revokeAuthorization(forKey: key)
+            } catch {
+                os_log(.error, log: .main, "Failed to revoke authorization for %{public}@: %{public}@", key, error.localizedDescription)
+            }
         }
 
         // Reset onboarding version
@@ -380,22 +376,41 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Helper
-    private func showAlert(title: String, message: String, style: NSAlert.Style) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = style
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
     private func showAccessibilityPermissionGuide() {
         let alert = NSAlert()
         alert.messageText = "Permission Required"
-        alert.informativeText = "FileRing needs Accessibility permission to capture global hotkeys. Please grant permission in Settings."
+        alert.informativeText = "FileRing needs Accessibility permission to capture global hotkeys."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+
+        // Attempt to create the EventTap — CGEvent.tapCreate will fail without
+        // permission and macOS will show the system Accessibility privacy dialog.
+        eventTapManager?.updateRegistration()
+
+        // Watch for the permission being granted via the undocumented-but-reliable
+        // distributed notification used by Loop and other projects.
+        // When permission is granted, force-restart the EventTap.
+        guard accessibilityObserver == nil else { return }
+        accessibilityObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.accessibility.api"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            // Slight delay: the notification fires before AXIsProcessTrusted updates
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                guard let manager = self.eventTapManager,
+                      manager.checkPermission() else { return }
+                // Remove observer and force-restart EventTap with current config
+                if let observer = self.accessibilityObserver {
+                    DistributedNotificationCenter.default().removeObserver(observer)
+                    self.accessibilityObserver = nil
+                }
+                manager.stop()
+                manager.start()
+            }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -416,28 +431,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
     }
 
     private func formattedHotkeyDescription(modifierKey: String, key: String) -> String {
-        let modifierSymbol: String
-        switch modifierKey.lowercased() {
-        case "option", "alt": modifierSymbol = "⌥ Option"
-        case "command": modifierSymbol = "⌘ Command"
-        case "control": modifierSymbol = "⌃ Control"
-        case "shift": modifierSymbol = "⇧ Shift"
-        case "none": modifierSymbol = ""
-        default: modifierSymbol = "⌥ Option"
-        }
-
-        let keyDescription: String
-        switch key.lowercased() {
-        case "space": keyDescription = "Space"
-        case "escape", "esc": keyDescription = "Esc"
-        default: keyDescription = key.uppercased()
-        }
-
-        if modifierSymbol.isEmpty {
-            return keyDescription
-        }
-
-        return "\(modifierSymbol) + \(keyDescription)"
+        KeyCodeMapping.formattedHotkeyDescription(modifierKey: modifierKey, key: key)
     }
 
     // MARK: - Hotkey Configuration

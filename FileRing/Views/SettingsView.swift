@@ -1,20 +1,21 @@
 //
 //  SettingsView.swift
-//  PopUp
+//  FileRing
 //
 //  Settings window UI
 //
 
 import SwiftUI
+import Combine
+import os.log
 
 struct SettingsView: View {
-    @State private var hotkeyMode = UserDefaults.standard.string(forKey: "FileRingHotkeyMode") ?? "combination"
-    @State private var selectedModifier = UserDefaults.standard.string(forKey: "FileRingModifierKey") ?? "option"
-    @State private var selectedKey = UserDefaults.standard.string(forKey: "FileRingKeyEquivalent") ?? "x"
-    @State private var itemsPerSection = UserDefaults.standard.integer(forKey: "FileRingItemsPerSection") > 0
-        ? UserDefaults.standard.integer(forKey: "FileRingItemsPerSection") : 6
-    @State private var hideDockIcon = UserDefaults.standard.bool(forKey: "FileRingHideDockIcon")
-    @State private var hideStatusBarIcon = UserDefaults.standard.bool(forKey: "FileRingHideStatusBarIcon")
+    @AppStorage(UserDefaultsKeys.hotkeyMode) private var hotkeyMode = "combination"
+    @AppStorage(UserDefaultsKeys.modifierKey) private var selectedModifier = "control"
+    @AppStorage(UserDefaultsKeys.keyEquivalent) private var selectedKey = "x"
+    @AppStorage(UserDefaultsKeys.itemsPerSection) private var itemsPerSection = 6
+    @AppStorage(UserDefaultsKeys.hideDockIcon) private var hideDockIcon = false
+    @AppStorage(UserDefaultsKeys.hideStatusBarIcon) private var hideStatusBarIcon = false
     @State private var authorizedFolders: [String] = BookmarkManager.shared.bookmarkKeys()
     @State private var showResetAlert = false
     @State private var showBothHiddenWarning = false
@@ -30,8 +31,14 @@ struct SettingsView: View {
     @State private var showLaunchError = false
     @State private var launchErrorMessage = ""
 
+    // Bookmark error alert
+    @State private var showBookmarkError = false
+    @State private var bookmarkErrorMessage = ""
+
     // Permission status
     @State private var hasAccessibilityPermission = false
+    @State private var accessibilityObserver: (any NSObjectProtocol)?
+    @State private var showRestartPrompt = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -68,6 +75,24 @@ struct SettingsView: View {
             // Check permission status
             checkPermissionStatus()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            let granted = AccessibilityHelper.checkPermission()
+            if granted && !hasAccessibilityPermission {
+                hasAccessibilityPermission = true
+                stopObservingPermission()
+                showRestartPrompt = true
+            } else {
+                hasAccessibilityPermission = granted
+            }
+        }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            guard !hasAccessibilityPermission else { return }
+            if AccessibilityHelper.checkPermission() {
+                hasAccessibilityPermission = true
+                stopObservingPermission()
+                showRestartPrompt = true
+            }
+        }
         .alert("Reset FileRing?", isPresented: $showResetAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset", role: .destructive) {
@@ -81,6 +106,17 @@ struct SettingsView: View {
         } message: {
             Text(launchErrorMessage)
         }
+        .alert("Accessibility Permission Granted", isPresented: $showRestartPrompt) {
+            Button("Restart Now") { restartApplication() }
+            Button("Later", role: .cancel) { }
+        } message: {
+            Text("FileRing needs to restart to activate the hotkey with the new permission.")
+        }
+        .alert("Folder Authorization Error", isPresented: $showBookmarkError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(bookmarkErrorMessage)
+        }
         .alert("Warning", isPresented: $showBothHiddenWarning) {
             Button("Cancel", role: .cancel) {
                 // Revert the most recent change
@@ -89,7 +125,7 @@ struct SettingsView: View {
                         // Find which one was changed last by checking current notification
                         // Since we can't determine this easily, revert status bar icon as it's instant
                         hideStatusBarIcon = false
-                        UserDefaults.standard.set(false, forKey: "FileRingHideStatusBarIcon")
+                        UserDefaults.standard.set(false, forKey: UserDefaultsKeys.hideStatusBarIcon)
                         NotificationCenter.default.post(name: .statusBarIconVisibilityChanged, object: nil)
                     }
                 }
@@ -132,14 +168,14 @@ struct SettingsView: View {
                 keySetting: $selectedKey
             ) { newModifier, newKey in
                 let defaults = UserDefaults.standard
-                defaults.set(newModifier, forKey: "FileRingModifierKey")
-                defaults.set(newKey, forKey: "FileRingKeyEquivalent")
+                defaults.set(newModifier, forKey: UserDefaultsKeys.modifierKey)
+                defaults.set(newKey, forKey: UserDefaultsKeys.keyEquivalent)
 
                 // Auto-detect mode based on whether key is provided
                 let newMode = newKey.isEmpty ? "modifier_only" : "combination"
                 if newMode != hotkeyMode {
                     hotkeyMode = newMode
-                    defaults.set(newMode, forKey: "FileRingHotkeyMode")
+                    defaults.set(newMode, forKey: UserDefaultsKeys.hotkeyMode)
                 }
 
                 NotificationCenter.default.post(name: .hotkeySettingChanged, object: nil)
@@ -214,9 +250,7 @@ struct SettingsView: View {
                     Text("\(num)").tag(num)
                 }
             }
-            .onChange(of: itemsPerSection) { newValue in
-                UserDefaults.standard.set(newValue, forKey: "FileRingItemsPerSection")
-            }
+            // @AppStorage automatically persists changes
 
             Text("Default: 6, Maximum: 10")
                 .font(.caption)
@@ -298,8 +332,6 @@ struct SettingsView: View {
 
             Toggle("Hide Dock icon", isOn: $hideDockIcon)
                 .onChange(of: hideDockIcon) { newValue in
-                    UserDefaults.standard.set(newValue, forKey: "FileRingHideDockIcon")
-                    // Check if both are hidden
                     if newValue && hideStatusBarIcon {
                         showBothHiddenWarning = true
                     }
@@ -313,8 +345,6 @@ struct SettingsView: View {
 
             Toggle("Hide Status Bar icon", isOn: $hideStatusBarIcon)
                 .onChange(of: hideStatusBarIcon) { newValue in
-                    UserDefaults.standard.set(newValue, forKey: "FileRingHideStatusBarIcon")
-                    // Check if both are hidden
                     if newValue && hideDockIcon {
                         showBothHiddenWarning = true
                     }
@@ -403,7 +433,11 @@ struct SettingsView: View {
     private func resetAndShowOnboarding() {
         let bookmarkKeys = BookmarkManager.shared.bookmarkKeys()
         for key in bookmarkKeys {
-            BookmarkManager.shared.revokeAuthorization(forKey: key)
+            do {
+                try BookmarkManager.shared.revokeAuthorization(forKey: key)
+            } catch {
+                os_log(.error, log: .main, "Failed to revoke authorization for %{public}@: %{public}@", key, error.localizedDescription)
+            }
         }
         AppVersion.completedOnboardingVersion = nil
 
@@ -421,7 +455,7 @@ struct SettingsView: View {
             // Notify that config has changed so FileSystemService reloads it
             NotificationCenter.default.post(name: .spotlightConfigChanged, object: nil)
         } catch {
-            print("Failed to save spotlight config: \(error)")
+            os_log(.error, log: .main, "Failed to save spotlight config: %{public}@", String(describing: error))
         }
     }
 
@@ -441,29 +475,12 @@ struct SettingsView: View {
         return "Click the field and press your desired shortcut. Must combine modifier keys with a regular key (e.g., ⌃X, ⌥Space)."
     }
 
-    @ViewBuilder
     private func folderPermissionRow(title: String, icon: String, key: String, folder: FileManager.SearchPathDirectory?) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .foregroundStyle(key == "iCloudDrive" ? .blue : .secondary)
-                .frame(width: 20)
-            Text(title)
-            Spacer()
-            if BookmarkManager.shared.isAuthorized(forKey: key) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else {
-                Button("Authorize") {
-                    if key == "iCloudDrive" {
-                        selectICloudDrive()
-                    } else if let folder = folder {
-                        selectFolder(key: key, defaultDirectory: folder)
-                    }
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .padding(.vertical, 2)
+        FolderPermissionRow(
+            title: title, icon: icon, key: key, folder: folder,
+            onError: { msg in bookmarkErrorMessage = msg; showBookmarkError = true },
+            onSuccess: { refreshAuthorizedFolders() }
+        )
     }
 
     @ViewBuilder
@@ -474,10 +491,15 @@ struct SettingsView: View {
                 .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
-                if let url = BookmarkManager.shared.loadUrl(withKey: key) {
-                    Text(url.lastPathComponent)
+                // Use new safe API to get folder information
+                let folderInfo = try? BookmarkManager.shared.withAuthorizedURL(key: key) { url in
+                    (name: url.lastPathComponent, path: url.path)
+                }
+
+                if let info = folderInfo {
+                    Text(info.name)
                         .font(.system(size: 13))
-                    Text(url.path)
+                    Text(info.path)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -496,83 +518,22 @@ struct SettingsView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Folder Selection
-    private func selectICloudDrive() {
-        let openPanel = NSOpenPanel()
-        openPanel.message = "Select iCloud Drive folder to grant access"
-        openPanel.prompt = "Select"
-        openPanel.canChooseFiles = false
-        openPanel.canChooseDirectories = true
-        openPanel.canCreateDirectories = false
-        openPanel.allowsMultipleSelection = false
-        openPanel.showsHiddenFiles = true
-
-        if let homeURL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first {
-            let mobileDocsURL = homeURL.appendingPathComponent("Mobile Documents")
-            openPanel.directoryURL = mobileDocsURL
-        }
-
-        openPanel.begin { response in
-            if response == .OK, let url = openPanel.url {
-                BookmarkManager.shared.saveBookmark(for: url, withKey: "iCloudDrive")
-                self.refreshAuthorizedFolders()
-            }
-        }
-    }
-
-    private func selectFolder(key: String, defaultDirectory: FileManager.SearchPathDirectory) {
-        let openPanel = NSOpenPanel()
-        openPanel.message = "Select \(key) folder to grant access"
-        openPanel.prompt = "Select"
-        openPanel.canChooseFiles = false
-        openPanel.canChooseDirectories = true
-        openPanel.canCreateDirectories = false
-        openPanel.allowsMultipleSelection = false
-
-        if let defaultURL = FileManager.default.urls(for: defaultDirectory, in: .userDomainMask).first {
-            openPanel.directoryURL = defaultURL
-        }
-
-        openPanel.begin { response in
-            if response == .OK, let url = openPanel.url {
-                BookmarkManager.shared.saveBookmark(for: url, withKey: key)
-                self.refreshAuthorizedFolders()
-            }
-        }
-    }
-
     // MARK: - Custom Folder Management
     private func addCustomFolder() {
-        let openPanel = NSOpenPanel()
-        openPanel.message = "Select a folder to authorize"
-        openPanel.prompt = "Authorize"
-        openPanel.canChooseFiles = false
-        openPanel.canChooseDirectories = true
-        openPanel.canCreateDirectories = false
-        openPanel.allowsMultipleSelection = false
-
-        openPanel.begin { response in
-            if response == .OK, let url = openPanel.url {
-                // Generate unique key for custom folder
-                let folderName = url.lastPathComponent
-                var key = "Custom_\(folderName)"
-                var counter = 1
-
-                // Ensure unique key
-                while BookmarkManager.shared.isAuthorized(forKey: key) {
-                    counter += 1
-                    key = "Custom_\(folderName)_\(counter)"
-                }
-
-                BookmarkManager.shared.saveBookmark(for: url, withKey: key)
-                self.refreshAuthorizedFolders()
-            }
-        }
+        FolderAuthorizationHelper.addCustomFolder(
+            onError: { msg in bookmarkErrorMessage = msg; showBookmarkError = true },
+            onSuccess: { refreshAuthorizedFolders() }
+        )
     }
 
     private func revokeAuthorization(forKey key: String) {
-        BookmarkManager.shared.revokeAuthorization(forKey: key)
-        self.refreshAuthorizedFolders()
+        do {
+            try BookmarkManager.shared.revokeAuthorization(forKey: key)
+            self.refreshAuthorizedFolders()
+        } catch {
+            bookmarkErrorMessage = "Failed to revoke authorization for \(key): \(error.localizedDescription)"
+            showBookmarkError = true
+        }
     }
 
     private func refreshAuthorizedFolders() {
@@ -580,22 +541,26 @@ struct SettingsView: View {
     }
 
     // MARK: - Permission Management
+
     private func checkPermissionStatus() {
-        hasAccessibilityPermission = CGPreflightPostEventAccess()
+        hasAccessibilityPermission = AccessibilityHelper.checkPermission()
+    }
+
+    private func stopObservingPermission() {
+        if let observer = accessibilityObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            accessibilityObserver = nil
+        }
     }
 
     private func openAccessibilitySettings() {
-        // Show reminder alert before opening System Settings
-        let alert = NSAlert()
-        alert.messageText = "Opening System Settings"
-        alert.informativeText = "After granting Accessibility permission, please restart FileRing for the changes to take effect."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        // Call with prompt=true to register the app in the Accessibility list,
+        // then open Settings so the user can enable the toggle.
+        _ = AccessibilityHelper.requestPermission()
+        AccessibilityHelper.openSystemSettings()
+    }
 
-        // Open System Settings
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
+    private func restartApplication() {
+        AccessibilityHelper.restartApp()
     }
 }

@@ -76,7 +76,7 @@ private extension DoubleRingPanelView {
             ringLayout
 
             if viewModel.isInitialLoading {
-                loadingState
+                loadingIndicator
             }
 
             if let error = viewModel.error {
@@ -84,13 +84,14 @@ private extension DoubleRingPanelView {
             }
 
             if viewModel.isLoadingSection && !viewModel.isInitialLoading {
-                inlineLoadingIndicator
+                loadingIndicator
+                    .transition(.opacity)
             }
         }
     }
 
     @ViewBuilder
-    var loadingState: some View {
+    var loadingIndicator: some View {
         if #available(macOS 26.0, *) {
             ProgressView()
                 .controlSize(.large)
@@ -103,24 +104,6 @@ private extension DoubleRingPanelView {
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
         }
-    }
-
-    var inlineLoadingIndicator: some View {
-        Group {
-            if #available(macOS 26.0, *) {
-                ProgressView()
-                    .controlSize(.large)
-                    .padding(10)
-                    .glassEffect()
-            } else {
-                ProgressView()
-                    .controlSize(.large)
-                    .padding(10)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-        }
-        .transition(.opacity)
     }
 
     func errorState(message: String) -> some View {
@@ -154,7 +137,7 @@ private extension DoubleRingPanelView {
 
                 if !viewModel.isInitialLoading {
                     DoubleRingItemsListView(
-                        items: displayItems,
+                        items: viewModel.displayItems,
                         layout: Layout.itemList,
                         side: viewModel.selectedSection.side,
                         center: center,
@@ -290,65 +273,10 @@ private extension DoubleRingPanelView {
             }
         } else if let openPath = hoverState.openFilePath {
             Task {
-                try? await viewModel.open(path: openPath)
+                await viewModel.open(path: openPath)
             }
         }
         // If neither is set, do nothing
     }
 }
 
-// MARK: - Helpers
-private extension DoubleRingPanelView {
-    var displayItems: [DoubleRingDisplayItem] {
-        if viewModel.selectedSection.contentType == .files {
-            return viewModel.fileItems.map {
-                DoubleRingDisplayItem(
-                    id: $0.id,
-                    name: $0.displayName,
-                    path: $0.path,
-                    isFolder: false,
-                    isApplication: $0.itemType == .application,
-                    parentPath: twoLevelParentPath(for: $0.path),
-                    lastModified: $0.timestamp
-                )
-            }
-        } else {
-            return viewModel.folderItems.map {
-                DoubleRingDisplayItem(
-                    id: $0.id,
-                    name: $0.displayName,
-                    path: $0.path,
-                    isFolder: true,
-                    isApplication: false,
-                    parentPath: twoLevelParentPath(for: $0.path),
-                    lastModified: $0.timestamp
-                )
-            }
-        }
-    }
-
-    func twoLevelParentPath(for path: String) -> String {
-        let url = URL(fileURLWithPath: path)
-        // Get immediate parent
-        let parent = url.deletingLastPathComponent()
-        var parentName = parent.lastPathComponent
-        // Get grandparent
-        let grandParent = parent.deletingLastPathComponent()
-        var grandParentName = grandParent.lastPathComponent
-        // Optimize iCloud path display
-        if parentName == "com~apple~CloudDocs" {
-            parentName = "iCloud"
-        }
-        if grandParentName == "com~apple~CloudDocs" {
-            grandParentName = "iCloud"
-        }
-        // Build two-level path
-        if parentName.isEmpty {
-            return "/"
-        } else if grandParentName.isEmpty {
-            return "/ \(parentName)"
-        } else {
-            return "\(grandParentName) / \(parentName)"
-        }
-    }
-}

@@ -1,6 +1,6 @@
 //
 //  AppSearchService.swift
-//  PopUp
+//  FileRing
 //
 //  Service for merging application and file search results
 //
@@ -185,9 +185,6 @@ class AppSearchService {
     /// Parse date string to Date for comparison
     private func parseDate(_ dateString: String?) -> Date? {
         guard let dateString = dateString else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
-        return formatter.date(from: dateString)
+        return DateFormatter.spotlightDateFormatter.date(from: dateString)
     }
 }

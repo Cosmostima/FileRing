@@ -1,6 +1,6 @@
 //
 //  DoubleRingViewModel.swift
-//  PopUp
+//  FileRing
 //
 //  Created by Cosmos on 30/10/2025.
 //
@@ -15,12 +15,13 @@ final class DoubleRingViewModel: ObservableObject {
     @Published private(set) var isInitialLoading = true
     @Published private(set) var isLoadingSection = false
     @Published private(set) var error: String?
-    @Published private(set) var fileItems: [FileItem] = []
-    @Published private(set) var folderItems: [FolderItem] = []
+    @Published private(set) var fileItems: [FileSystemItem] = []
+    @Published private(set) var folderItems: [FileSystemItem] = []
+    @Published private(set) var displayItems: [DoubleRingDisplayItem] = []
 
     private let fileSystemService: FileSystemService
-    private var cachedFiles: [PanelSection: [FileItem]] = [:]
-    private var cachedFolders: [PanelSection: [FolderItem]] = [:]
+    private var cachedFiles: [PanelSection: [FileSystemItem]] = [:]
+    private var cachedFolders: [PanelSection: [FileSystemItem]] = [:]
     private var preloadTask: Task<Void, Never>?
     private var loadingSections = Set<PanelSection>()
 
@@ -54,6 +55,7 @@ final class DoubleRingViewModel: ObservableObject {
         if applyCachedData(for: section) {
             error = nil
             isLoadingSection = false
+            updateDisplayItems()
         } else if loadingSections.contains(section) {
             error = nil
             isLoadingSection = true
@@ -62,8 +64,12 @@ final class DoubleRingViewModel: ObservableObject {
         }
     }
 
-    func open(path: String) async throws {
-        try await fileSystemService.open(path: path)
+    func open(path: String) async {
+        do {
+            try await fileSystemService.open(path: path)
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func copyToClipboard(path: String, mode: ClipboardMode) async {
@@ -76,6 +82,57 @@ final class DoubleRingViewModel: ObservableObject {
 
     func handlePanelHide() {
         startNewSession()
+    }
+
+    // MARK: - Display Items
+
+    private func updateDisplayItems() {
+        if selectedSection.contentType == .files {
+            displayItems = fileItems.map {
+                DoubleRingDisplayItem(
+                    id: $0.id,
+                    name: $0.displayName,
+                    path: $0.path,
+                    isFolder: false,
+                    isApplication: $0.itemType == .application,
+                    parentPath: Self.twoLevelParentPath(for: $0.path),
+                    lastModified: $0.timestamp
+                )
+            }
+        } else {
+            displayItems = folderItems.map {
+                DoubleRingDisplayItem(
+                    id: $0.id,
+                    name: $0.displayName,
+                    path: $0.path,
+                    isFolder: true,
+                    isApplication: false,
+                    parentPath: Self.twoLevelParentPath(for: $0.path),
+                    lastModified: $0.timestamp
+                )
+            }
+        }
+    }
+
+    private static func twoLevelParentPath(for path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let parent = url.deletingLastPathComponent()
+        var parentName = parent.lastPathComponent
+        let grandParent = parent.deletingLastPathComponent()
+        var grandParentName = grandParent.lastPathComponent
+        if parentName == "com~apple~CloudDocs" {
+            parentName = "iCloud"
+        }
+        if grandParentName == "com~apple~CloudDocs" {
+            grandParentName = "iCloud"
+        }
+        if parentName.isEmpty {
+            return "/"
+        } else if grandParentName.isEmpty {
+            return "/ \(parentName)"
+        } else {
+            return "\(grandParentName) / \(parentName)"
+        }
     }
 }
 
@@ -150,6 +207,7 @@ private extension DoubleRingViewModel {
                     fileItems = items
                     folderItems = []
                     isLoadingSection = false
+                    updateDisplayItems()
                 }
             case .folders:
                 let items = try await fileSystemService.fetchFolders(for: section.category, limit: itemsLimit)
@@ -159,6 +217,7 @@ private extension DoubleRingViewModel {
                     folderItems = items
                     fileItems = []
                     isLoadingSection = false
+                    updateDisplayItems()
                 }
             }
         } catch {
@@ -172,7 +231,7 @@ private extension DoubleRingViewModel {
         }
     }
     
-    func cachedSnapshot(for section: PanelSection) -> ([FileItem], [FolderItem])? {
+    func cachedSnapshot(for section: PanelSection) -> ([FileSystemItem], [FileSystemItem])? {
         if let files = cachedFiles[section] {
             return (files, [])
         }
