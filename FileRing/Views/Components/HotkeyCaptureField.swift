@@ -180,7 +180,6 @@ struct HotkeyCaptureField: NSViewRepresentable {
         var isCapturing = false
         private var eventMonitor: Any?
         private var currentModifiers: NSEvent.ModifierFlags = []
-        private var lastModifierFlags: NSEvent.ModifierFlags = []
         private var capturedKeys: Set<String> = []  // Track all pressed keys
         private var maxKeyCombo: (modifiers: NSEvent.ModifierFlags, keys: Set<String>)?  // Peak combination
 
@@ -196,7 +195,6 @@ struct HotkeyCaptureField: NSViewRepresentable {
         func startCapturing() {
             isCapturing = true
             currentModifiers = []
-            lastModifierFlags = []
             capturedKeys = []
             maxKeyCombo = nil
             NotificationCenter.default.post(name: .hotkeyRecordingStarted, object: nil)
@@ -222,7 +220,6 @@ struct HotkeyCaptureField: NSViewRepresentable {
         func stopCapturing() {
             isCapturing = false
             currentModifiers = []
-            lastModifierFlags = []
             capturedKeys = []
             maxKeyCombo = nil
 
@@ -261,8 +258,8 @@ struct HotkeyCaptureField: NSViewRepresentable {
                 return nil
             }
 
-            // Add to captured keys
-            capturedKeys.insert(keyString)
+            // Only allow one regular key at a time
+            capturedKeys = [keyString]
             currentModifiers = modifiers
 
             // Update the max combo (peak)
@@ -349,9 +346,8 @@ struct HotkeyCaptureField: NSViewRepresentable {
 
             let modifierString = modifierString(from: combo.modifiers)
 
-            // Join all captured keys (support multiple keys like ⌘CV)
-            // Sort keys alphabetically for consistency
-            let keysString = combo.keys.sorted().joined()
+            // Use the single captured key
+            let keysString = combo.keys.first!
 
             applyHotkey(modifier: modifierString, key: keysString)
 

@@ -49,6 +49,7 @@ class EventTapManager {
         var currentConfig: HotkeyConfig?
         var isRunning: Bool = false
         var isRecordingHotkey: Bool = false
+        var didConsumeKeyDown: Bool = false
         var stopSemaphore: DispatchSemaphore?
     }
 
@@ -61,7 +62,6 @@ class EventTapManager {
     nonisolated(unsafe) private var runLoop: CFRunLoop?
     nonisolated(unsafe) private var runLoopQueue: DispatchQueue?
     nonisolated(unsafe) private var modifierFlags: CGEventFlags = []
-    nonisolated(unsafe) private var didConsumeKeyDown = false
     nonisolated(unsafe) private var eventType: EventTapType
     nonisolated(unsafe) private var callback: (CGEvent) -> EventTapResult
 
@@ -214,12 +214,12 @@ class EventTapManager {
         guard shouldUpdate else { return }
 
         // Reset state when changing hotkey configuration
-        didConsumeKeyDown = false
+        sharedState.withLock { $0.didConsumeKeyDown = false }
         Task { @MainActor in
             self.hotkeyState = .idle
         }
 
-        stop()
+        stopAndWait()
         start()
     }
 
@@ -227,22 +227,26 @@ class EventTapManager {
 
     func checkPermission() -> Bool {
         let hasPermission = AccessibilityHelper.checkPermission()
-        os_log(.info, log: .main, "Accessibility permission check: %{public}@", hasPermission ? "granted" : "denied")
+        Logger.main.info("Accessibility permission check: \(hasPermission ? "granted" : "denied")")
         return hasPermission
     }
 
     func requestPermission() async -> Bool {
-        os_log(.info, log: .main, "Requesting Accessibility permission via system prompt...")
+        Logger.main.info("Requesting Accessibility permission via system prompt...")
         let granted = AccessibilityHelper.requestPermission()
-        os_log(.info, log: .main, "Permission request result: %{public}@", granted ? "granted" : "denied")
+        Logger.main.info("Permission request result: \(granted ? "granted" : "denied")")
         return granted
     }
 
     // MARK: - Public Methods
 
     func start() {
-        let alreadyRunning = sharedState.withLock { $0.isRunning }
-        guard !alreadyRunning else { return }
+        let didClaim = sharedState.withLock { state -> Bool in
+            guard !state.isRunning else { return false }
+            state.isRunning = true
+            return true
+        }
+        guard didClaim else { return }
 
         let queue = DispatchQueue(label: "com.filering.eventtap.\(UUID().uuidString)", qos: .userInteractive)
         self.runLoopQueue = queue
@@ -262,7 +266,7 @@ class EventTapManager {
         guard wasRunning else { return }
 
         // Reset state when stopping to prevent stale state issues
-        didConsumeKeyDown = false
+        sharedState.withLock { $0.didConsumeKeyDown = false }
         Task { @MainActor in
             self.hotkeyState = .idle
         }
@@ -281,7 +285,7 @@ class EventTapManager {
         guard wasRunning else { return }
 
         // Reset state when stopping
-        didConsumeKeyDown = false
+        sharedState.withLock { $0.didConsumeKeyDown = false }
         Task { @MainActor in
             self.hotkeyState = .idle
         }
@@ -352,8 +356,12 @@ class EventTapManager {
             callback: callback,
             userInfo: selfPtr
         ) else {
+            // Use os_log (free function) to avoid @MainActor inference from Logger.main static property.
             os_log(.error, "Failed to create event tap - Accessibility permission required")
-            sharedState.withLock { state in _ = state.stopSemaphore?.signal() }
+            sharedState.withLock { state in
+                state.isRunning = false
+                _ = state.stopSemaphore?.signal()
+            }
             return
         }
 
@@ -367,14 +375,27 @@ class EventTapManager {
 
         CFRunLoopAddSource(currentRunLoop, source, .commonModes)
 
+        // Check if stop() was called between start() claiming isRunning and now.
+        // If so, don't enter the run loop — just clean up.
+        let stillRunning = sharedState.withLock { $0.isRunning }
+        guard stillRunning else {
+            cleanupResources()
+            sharedState.withLock { state in _ = state.stopSemaphore?.signal() }
+            return
+        }
+
         CGEvent.tapEnable(tap: tap, enable: true)
-        sharedState.withLock { state in state.isRunning = true }
 
         CFRunLoopRun()
 
+        // RunLoop exited (either via stop() or unexpectedly).
+        // Ensure isRunning is false so start() can be called again.
         cleanupResources()
 
-        sharedState.withLock { state in _ = state.stopSemaphore?.signal() }
+        sharedState.withLock { state in
+            state.isRunning = false
+            _ = state.stopSemaphore?.signal()
+        }
     }
 
     nonisolated private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -399,9 +420,9 @@ class EventTapManager {
 
             // Track keyDown/keyUp state to ensure proper event pairing
             if type == .keyDown {
-                didConsumeKeyDown = true
+                sharedState.withLock { $0.didConsumeKeyDown = true }
             } else if type == .keyUp {
-                didConsumeKeyDown = false
+                sharedState.withLock { $0.didConsumeKeyDown = false }
             }
 
             // Return nil to consume the event and prevent system beep
@@ -435,7 +456,7 @@ class EventTapManager {
             if keyCode == Int(config.keyCode ?? 0) {
                 if eventType == .keyUp {
                     // CRITICAL FIX: Only consume keyUp if we consumed the corresponding keyDown
-                    return didConsumeKeyDown
+                    return sharedState.withLock { $0.didConsumeKeyDown }
                 }
                 // For keyDown, check modifiers
                 return modifiersMatch(event.flags, modifiers: config.modifiers)
@@ -533,7 +554,7 @@ class EventTapManager {
         self.runLoopQueue = nil
 
         // Reset state flags
-        didConsumeKeyDown = false
+        sharedState.withLock { $0.didConsumeKeyDown = false }
         Task { @MainActor in
             self.hotkeyState = .idle
         }

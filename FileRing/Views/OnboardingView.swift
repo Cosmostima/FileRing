@@ -17,7 +17,6 @@ struct OnboardingView: View {
     @State private var hasAccessibilityPermission = false
     @State private var showBookmarkError = false
     @State private var bookmarkErrorMessage = ""
-    @State private var accessibilityObserver: (any NSObjectProtocol)?
 
     let onComplete: () -> Void
 
@@ -405,10 +404,8 @@ struct OnboardingView: View {
     }
 
     private func stopObservingPermission() {
-        if let observer = accessibilityObserver {
-            DistributedNotificationCenter.default().removeObserver(observer)
-            accessibilityObserver = nil
-        }
+        // Permission observation is handled by Timer and didBecomeActive receivers;
+        // this method is kept as a hook for future cleanup if needed.
     }
 
     private func openAccessibilitySettings() {

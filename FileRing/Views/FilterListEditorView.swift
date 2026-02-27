@@ -14,7 +14,6 @@ struct FilterListEditorView: View {
     @Binding var items: [String]
     @Environment(\.dismiss) private var dismiss
 
-    @State private var newItem: String = ""
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var selectedItem: String?

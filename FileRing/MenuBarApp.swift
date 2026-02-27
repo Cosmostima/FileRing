@@ -7,7 +7,7 @@
 
 import SwiftUI
 import AppKit
-import os.log
+import os
 
 class MenuBarApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
@@ -359,7 +359,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
             do {
                 try BookmarkManager.shared.revokeAuthorization(forKey: key)
             } catch {
-                os_log(.error, log: .main, "Failed to revoke authorization for %{public}@: %{public}@", key, error.localizedDescription)
+                Logger.main.error("Failed to revoke authorization for \(key): \(error.localizedDescription)")
             }
         }
 
@@ -407,7 +407,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
                     DistributedNotificationCenter.default().removeObserver(observer)
                     self.accessibilityObserver = nil
                 }
-                manager.stop()
+                manager.stopAndWait()
                 manager.start()
             }
         }

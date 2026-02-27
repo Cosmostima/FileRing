@@ -62,9 +62,6 @@ struct SpotlightConfig: Codable {
 
     // MARK: - Performance
 
-    /// Cache duration in seconds
-    var cacheSeconds: Int = 60
-
     /// Query timeout in seconds
     var queryTimeoutSeconds: Int = 10
 

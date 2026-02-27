@@ -47,17 +47,13 @@ struct DoubleRingPanelView: View {
             .onAppear {
                 guard !hasTriggeredInitialRefresh else { return }
                 hasTriggeredInitialRefresh = true
-                DispatchQueue.main.async {
-                    Task { await refreshWithEntranceAnimation() }
-                }
+                Task { await refreshWithEntranceAnimation() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .triggerHoveredItem)) { _ in
                 performCurrentHoverAction()
             }
             .onReceive(NotificationCenter.default.publisher(for: .refreshPanel)) { _ in
-                DispatchQueue.main.async {
-                    Task { await refreshWithEntranceAnimation() }
-                }
+                Task { await refreshWithEntranceAnimation() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .hidePanel)) { _ in
                 hoverState.clear()

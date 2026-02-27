@@ -7,7 +7,7 @@
 
 import SwiftUI
 import Combine
-import os.log
+import os
 
 struct SettingsView: View {
     @AppStorage(UserDefaultsKeys.hotkeyMode) private var hotkeyMode = "combination"
@@ -37,7 +37,6 @@ struct SettingsView: View {
 
     // Permission status
     @State private var hasAccessibilityPermission = false
-    @State private var accessibilityObserver: (any NSObjectProtocol)?
     @State private var showRestartPrompt = false
 
     var body: some View {
@@ -436,7 +435,7 @@ struct SettingsView: View {
             do {
                 try BookmarkManager.shared.revokeAuthorization(forKey: key)
             } catch {
-                os_log(.error, log: .main, "Failed to revoke authorization for %{public}@: %{public}@", key, error.localizedDescription)
+                Logger.main.error("Failed to revoke authorization for \(key): \(error.localizedDescription)")
             }
         }
         AppVersion.completedOnboardingVersion = nil
@@ -455,7 +454,7 @@ struct SettingsView: View {
             // Notify that config has changed so FileSystemService reloads it
             NotificationCenter.default.post(name: .spotlightConfigChanged, object: nil)
         } catch {
-            os_log(.error, log: .main, "Failed to save spotlight config: %{public}@", String(describing: error))
+            Logger.main.error("Failed to save spotlight config: \(String(describing: error))")
         }
     }
 
@@ -547,10 +546,8 @@ struct SettingsView: View {
     }
 
     private func stopObservingPermission() {
-        if let observer = accessibilityObserver {
-            DistributedNotificationCenter.default().removeObserver(observer)
-            accessibilityObserver = nil
-        }
+        // Permission observation is handled by Timer and didBecomeActive receivers;
+        // this method is kept as a hook for future cleanup if needed.
     }
 
     private func openAccessibilitySettings() {

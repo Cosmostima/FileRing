@@ -122,10 +122,19 @@ final class SecurePathValidator {
         let standardizedURL = URL(fileURLWithPath: resolvedPath).standardized
         let standardizedPath = standardizedURL.path
 
-        // Step 3: Convert to lowercase for case-insensitive comparison
-        // macOS filesystems (HFS+, APFS) are case-insensitive by default
-        // This prevents: /Users/Bob/Documents vs /users/bob/documents
-        let lowercasedPath = standardizedPath.lowercased()
+        // Step 3: Convert to lowercase for case-insensitive comparison (only on case-insensitive volumes)
+        // macOS filesystems (HFS+, APFS) are typically case-insensitive, but case-sensitive
+        // volumes are possible. Check the volume's actual setting.
+        let isCaseSensitive: Bool = {
+            let url = URL(fileURLWithPath: standardizedPath)
+            if let values = try? url.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]),
+               let caseSensitive = values.volumeSupportsCaseSensitiveNames {
+                return caseSensitive
+            }
+            // Default to case-insensitive for non-existent paths or lookup failures
+            return false
+        }()
+        let lowercasedPath = isCaseSensitive ? standardizedPath : standardizedPath.lowercased()
 
         // Step 4: Unicode NFC normalization
         // Prevents homograph attacks with different Unicode representations

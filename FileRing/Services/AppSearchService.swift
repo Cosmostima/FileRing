@@ -78,12 +78,16 @@ class AppSearchService {
 
     // MARK: - Private Helpers
 
-    /// Merge files and apps sorted by time, guaranteeing minimum file count
-    private func mergeByTime(
+    /// Generic merge of files and apps, guaranteeing minimum file count.
+    /// Items are compared using the provided `value` closures and `isHigherPriority` comparator.
+    private func mergeItems<V>(
         files: [FileSystemItem],
         apps: [FileSystemItem],
         limit: Int,
-        minFileCount: Int
+        minFileCount: Int,
+        fileValue: (FileSystemItem) -> V?,
+        appValue: (FileSystemItem) -> V?,
+        isHigherPriority: (V, V) -> Bool
     ) -> [FileSystemItem] {
         var results: [FileSystemItem] = []
         var fileIndex = 0
@@ -97,29 +101,25 @@ class AppSearchService {
 
         // Calculate how many apps we can actually add while maintaining 50% file ratio
         let actualFileCount = fileIndex
-        // If we have fewer files than minFileCount, relax the constraint and allow apps to fill
         let maxAppCount = actualFileCount >= minFileCount ? actualFileCount : limit
 
-        // Then merge remaining items by time, respecting the app limit
+        // Then merge remaining items by priority, respecting the app limit
         while results.count < limit && (fileIndex < files.count || (appIndex < apps.count && appIndex < maxAppCount)) {
-            let fileTime = fileIndex < files.count ? parseDate(files[fileIndex].lastUsed) : nil
-            let appTime = (appIndex < apps.count && appIndex < maxAppCount) ? parseDate(apps[appIndex].lastUsed) : nil
+            let fVal = fileIndex < files.count ? fileValue(files[fileIndex]) : nil
+            let aVal = (appIndex < apps.count && appIndex < maxAppCount) ? appValue(apps[appIndex]) : nil
 
-            if let fTime = fileTime, let aTime = appTime {
-                // Both available: pick newer one
-                if fTime > aTime {
+            if let f = fVal, let a = aVal {
+                if isHigherPriority(f, a) {
                     results.append(files[fileIndex])
                     fileIndex += 1
                 } else {
                     results.append(apps[appIndex])
                     appIndex += 1
                 }
-            } else if fileTime != nil {
-                // Only file available
+            } else if fVal != nil {
                 results.append(files[fileIndex])
                 fileIndex += 1
-            } else if appTime != nil {
-                // Only app available (within limit)
+            } else if aVal != nil {
                 results.append(apps[appIndex])
                 appIndex += 1
             } else {
@@ -130,6 +130,21 @@ class AppSearchService {
         return results
     }
 
+    /// Merge files and apps sorted by time, guaranteeing minimum file count
+    private func mergeByTime(
+        files: [FileSystemItem],
+        apps: [FileSystemItem],
+        limit: Int,
+        minFileCount: Int
+    ) -> [FileSystemItem] {
+        mergeItems(
+            files: files, apps: apps, limit: limit, minFileCount: minFileCount,
+            fileValue: { self.parseDate($0.lastUsed) },
+            appValue: { self.parseDate($0.lastUsed) },
+            isHigherPriority: { $0 > $1 }
+        )
+    }
+
     /// Merge files and apps sorted by use count, guaranteeing minimum file count
     private func mergeByUseCount(
         files: [FileSystemItem],
@@ -137,49 +152,12 @@ class AppSearchService {
         limit: Int,
         minFileCount: Int
     ) -> [FileSystemItem] {
-        var results: [FileSystemItem] = []
-        var fileIndex = 0
-        var appIndex = 0
-
-        // First, add all available files up to minFileCount
-        while results.count < minFileCount && fileIndex < files.count {
-            results.append(files[fileIndex])
-            fileIndex += 1
-        }
-
-        // Calculate how many apps we can actually add while maintaining 50% file ratio
-        let actualFileCount = fileIndex
-        // If we have fewer files than minFileCount, relax the constraint and allow apps to fill
-        let maxAppCount = actualFileCount >= minFileCount ? actualFileCount : limit
-
-        // Then merge remaining items by use count (apps already have adjusted count), respecting the app limit
-        while results.count < limit && (fileIndex < files.count || (appIndex < apps.count && appIndex < maxAppCount)) {
-            let fileCount = fileIndex < files.count ? (files[fileIndex].useCount ?? 0) : -1
-            let appCount = (appIndex < apps.count && appIndex < maxAppCount) ? (apps[appIndex].useCount ?? 0) : -1
-
-            if fileCount >= 0 && appCount >= 0 {
-                // Both available: pick higher count
-                if fileCount >= appCount {
-                    results.append(files[fileIndex])
-                    fileIndex += 1
-                } else {
-                    results.append(apps[appIndex])
-                    appIndex += 1
-                }
-            } else if fileCount >= 0 {
-                // Only file available
-                results.append(files[fileIndex])
-                fileIndex += 1
-            } else if appCount >= 0 {
-                // Only app available (within limit)
-                results.append(apps[appIndex])
-                appIndex += 1
-            } else {
-                break
-            }
-        }
-
-        return results
+        mergeItems(
+            files: files, apps: apps, limit: limit, minFileCount: minFileCount,
+            fileValue: { $0.useCount ?? 0 },
+            appValue: { $0.useCount ?? 0 },
+            isHigherPriority: { $0 >= $1 }
+        )
     }
 
     /// Parse date string to Date for comparison

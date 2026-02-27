@@ -127,18 +127,11 @@ class BookmarkManager {
     /// - Parameter key: Bookmark identifier to revoke
     /// - Throws: BookmarkError if revocation fails
     func revokeAuthorization(forKey key: String) throws {
-        // Get path before removing (for cache cleanup)
-        let pathToRemove: String? = try? withAuthorizedURL(key: key) { url in
-            return url.path
-        }
-
         // Remove from resource pool (stops resource and removes from storage)
         try resourcePool.remove(key: key)
 
-        // Remove from path cache
-        if let path = pathToRemove {
-            removePathFromCache(path)
-        }
+        // Rebuild paths cache from remaining bookmarks to ensure consistency
+        rebuildAndSavePathsCache()
     }
 
     /// Check if path is in authorized folders (SECURE VERSION).

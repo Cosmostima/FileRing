@@ -13,6 +13,7 @@ class FileSystemService {
     private var spotlight: SpotlightManager
     private var appSearchService: AppSearchService
     private var config: SpotlightConfig
+    private var configObserver: (any NSObjectProtocol)?
 
     init() {
         let config = SpotlightConfig.load()
@@ -21,7 +22,7 @@ class FileSystemService {
         self.appSearchService = AppSearchService(config: config, spotlightManager: self.spotlight)
 
         // Listen for config changes
-        NotificationCenter.default.addObserver(
+        configObserver = NotificationCenter.default.addObserver(
             forName: .spotlightConfigChanged,
             object: nil,
             queue: .main
@@ -33,7 +34,9 @@ class FileSystemService {
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self)
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     private func reloadConfig() {
