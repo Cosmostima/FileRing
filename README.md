@@ -29,6 +29,12 @@ FileRing provides a keyboard-driven circular launcher that displays your recentl
 
 ![OverView Example](Assets/OverView.gif)
 
+## Supporters
+
+Thanks to everyone who has supported this project!
+
+<a href="https://github.com/jilinju0715-pixel"><img src="Assets/supporters.svg" alt="jilinju0715-pixel" height="66"/></a>
+
 ## Features
 
 ### 1. File Categorizes
@@ -82,84 +88,27 @@ FileRing runs as a lightweight menu bar application. Both the dock icon and stat
 
 ## Installation
 
-### Requirements
+**Requirements:** macOS 13.0 or later · Apple Silicon or Intel
 
-- macOS 13.0 or later
-- Apple Silicon or Intel processor
+### Download (Recommended)
 
-### Option 1: Download Pre-built Release (Not Recommended)
+1. Go to the [Releases](https://github.com/Cosmostima/FileRing/releases) page and download the latest `FileRing.dmg`
+2. Open the DMG, drag `FileRing.app` to your Applications folder
+3. Launch FileRing and grant the requested permissions
 
-1. Download the latest release from the Releases page
-2. Extract and move `FileRing.app` to Applications folder
-3. Right-click and select "Open" on first launch (unsigned application)
-4. Grant necessary permissions when prompted
+> The app is signed and notarized by Apple — no security warnings, no extra steps.
 
+### Build from Source
 
-### Option 1: Download Pre-built Release (Not Recommended)
-
-**⚠️ Important:**
-
-Due to the lack of an Apple Developer account, the pre-built app is **not notarized or signed**. macOS will show security warnings. **Building from source (Option 2) is strongly recommended.**
-
-**If you still want to use the pre-built version:**
-
-1. Download the latest release from the [Releases](https://github.com/Cosmostima/FileRing/releases) page
-2. Extract and move `FileRing.app` to Applications folder
-3. Remove quarantine attribute:
-```bash
-   xattr -cr /Applications/FileRing.app
-```
-4. **Alternative**: Right-click → "Open" → Click "Open" in the dialog
-5. **If still blocked**: System Settings → Privacy & Security → "Open Anyway"
-6. Grant necessary permissions when prompted
-
-### Option 2: Build from Source (Recommended)
-
-Building from source allows you to sign the app with your own Apple ID, avoiding system security warnings.
-
-
-#### GUI Method (Xcode)
+For developers who want to modify or contribute:
 
 ```bash
-# Clone the repository
 git clone https://github.com/Cosmostima/FileRing.git
 cd FileRing
-
-# Open in Xcode
 open FileRing.xcodeproj
 ```
 
-**In Xcode:**
-1. Select the FileRing project in the navigator
-2. Choose the FileRing target under TARGETS
-3. Go to "Signing & Capabilities" tab
-4. Enable "Automatically manage signing"
-5. Select your Apple ID in the Team dropdown (add account if needed)
-6. Click Run (⌘R) to build and launch
-
-**To export a standalone app:**
-1. Product → Archive
-2. Click "Distribute App"
-3. Choose "Copy App" (maybe in custom options)
-4. Save to desired location
-
-#### Command Line Method
-
-```bash
-# Clone the repository
-git clone https://github.com/Cosmostima/FileRing.git
-cd FileRing
-
-# Build the application
-xcodebuild -project FileRing.xcodeproj -scheme FileRing -configuration Release -derivedDataPath build clean build
-
-# The FileRing.app will be located in the build/Build/Products/Release/ directory.
-# You can then copy it to your /Applications folder.
-cp -r build/Build/Products/Release/FileRing.app /Applications/
-open /Applications/FileRing.app
-```
-
-**Note:** Command line builds require code signing to be configured in Xcode at least once. Open the project in Xcode and set up your Apple ID under "Signing & Capabilities" before using `xcodebuild`.
+In Xcode, select your Team under **Signing & Capabilities**, then press **⌘R** to build and run.
 
 ## Usage
 
@@ -236,6 +185,8 @@ Click "Manage" to add or remove items. Changes take effect immediately.
 ## Inspiration
 
 FileRing's interaction model is inspired by [Loop](https://github.com/MrKai77/Loop), an elegant window management tool for macOS.
+
+
 
 ## License
 

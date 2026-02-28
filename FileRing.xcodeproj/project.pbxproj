@@ -6,11 +6,32 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E37EED76ECBFB951AB819749 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FA4851E4728B347B124E8AFC /* Cocoa.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F1E47481155A7BC640DFFF1E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49036EF12EB2FC580021BB0A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 49036EF82EB2FC580021BB0A;
+			remoteInfo = FileRing;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		49036EF92EB2FC580021BB0A /* FileRing.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FileRing.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A6AC8189DA7D7B5943479FEF /* FileRingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FileRingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA4851E4728B347B124E8AFC /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		002ADD9A498281B458472F25 /* FileRingTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FileRingTests;
+			sourceTree = "<group>";
+		};
 		49036EFB2EB2FC580021BB0A /* FileRing */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = FileRing;
@@ -19,6 +40,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		133236F70C943AD8D7A05645 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E37EED76ECBFB951AB819749 /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49036EF62EB2FC580021BB0A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -34,6 +63,8 @@
 			children = (
 				49036EFB2EB2FC580021BB0A /* FileRing */,
 				49036EFA2EB2FC580021BB0A /* Products */,
+				E49A854D210433CF562A0DA0 /* Frameworks */,
+				002ADD9A498281B458472F25 /* FileRingTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -41,8 +72,25 @@
 			isa = PBXGroup;
 			children = (
 				49036EF92EB2FC580021BB0A /* FileRing.app */,
+				A6AC8189DA7D7B5943479FEF /* FileRingTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		74C04C1114984560BA6463C6 /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				FA4851E4728B347B124E8AFC /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
+		E49A854D210433CF562A0DA0 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				74C04C1114984560BA6463C6 /* OS X */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -64,11 +112,30 @@
 				49036EFB2EB2FC580021BB0A /* FileRing */,
 			);
 			name = FileRing;
-			packageProductDependencies = (
-			);
 			productName = PopUp;
 			productReference = 49036EF92EB2FC580021BB0A /* FileRing.app */;
 			productType = "com.apple.product-type.application";
+		};
+		8EC6CA20288D2A9F68E5DA40 /* FileRingTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 959A968D28EDBF3165EC6B7C /* Build configuration list for PBXNativeTarget "FileRingTests" */;
+			buildPhases = (
+				A0FFA8380B58371C0C413CD2 /* Sources */,
+				133236F70C943AD8D7A05645 /* Frameworks */,
+				322C943FA59C7B5C277800E7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				351104918D071D8757B0414A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				002ADD9A498281B458472F25 /* FileRingTests */,
+			);
+			name = FileRingTests;
+			productName = FileRingTests;
+			productReference = A6AC8189DA7D7B5943479FEF /* FileRingTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -100,11 +167,19 @@
 			projectRoot = "";
 			targets = (
 				49036EF82EB2FC580021BB0A /* FileRing */,
+				8EC6CA20288D2A9F68E5DA40 /* FileRingTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		322C943FA59C7B5C277800E7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49036EF72EB2FC580021BB0A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -122,9 +197,43 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A0FFA8380B58371C0C413CD2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		351104918D071D8757B0414A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = FileRing;
+			target = 49036EF82EB2FC580021BB0A /* FileRing */;
+			targetProxy = F1E47481155A7BC640DFFF1E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		091488C7AFF11758B9BD2F81 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cosmos.FileRing.tests;
+				PRODUCT_MODULE_NAME = FileRingTests;
+				PRODUCT_NAME = FileRingTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FileRing.app/Contents/MacOS/FileRing";
+			};
+			name = Release;
+		};
 		49036F022EB2FC580021BB0A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -281,7 +390,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0.7;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cosmos.FileRing;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -337,7 +446,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0.7;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cosmos.FileRing;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -357,6 +466,26 @@
 			};
 			name = Release;
 		};
+		525940A25E2111B1F4EC1FAF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cosmos.FileRing.tests;
+				PRODUCT_MODULE_NAME = FileRingTests;
+				PRODUCT_NAME = FileRingTests;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FileRing.app/Contents/MacOS/FileRing";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -374,6 +503,15 @@
 			buildConfigurations = (
 				49036F052EB2FC580021BB0A /* Debug */,
 				49036F062EB2FC580021BB0A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		959A968D28EDBF3165EC6B7C /* Build configuration list for PBXNativeTarget "FileRingTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				091488C7AFF11758B9BD2F81 /* Release */,
+				525940A25E2111B1F4EC1FAF /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

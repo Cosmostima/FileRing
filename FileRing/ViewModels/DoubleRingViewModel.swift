@@ -19,13 +19,13 @@ final class DoubleRingViewModel: ObservableObject {
     @Published private(set) var folderItems: [FileSystemItem] = []
     @Published private(set) var displayItems: [DoubleRingDisplayItem] = []
 
-    private let fileSystemService: FileSystemService
+    private let fileSystemService: any FileSystemServiceProtocol
     private var cachedFiles: [PanelSection: [FileSystemItem]] = [:]
     private var cachedFolders: [PanelSection: [FileSystemItem]] = [:]
     private var preloadTask: Task<Void, Never>?
     private var loadingSections = Set<PanelSection>()
 
-    init(fileSystemService: FileSystemService? = nil) {
+    init(fileSystemService: (any FileSystemServiceProtocol)? = nil) {
         self.fileSystemService = fileSystemService ?? FileSystemService()
     }
 

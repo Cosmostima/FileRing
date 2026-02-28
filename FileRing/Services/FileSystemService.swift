@@ -9,7 +9,7 @@ import Foundation
 import os.log
 
 @MainActor
-class FileSystemService {
+class FileSystemService: FileSystemServiceProtocol {
     private var spotlight: SpotlightManager
     private var appSearchService: AppSearchService
     private var config: SpotlightConfig

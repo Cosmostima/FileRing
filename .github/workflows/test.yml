@@ -1,0 +1,58 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit Tests (macOS)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # Use the newest Xcode available on the runner
+          XCODE=$(ls /Applications | grep -E "^Xcode" | sort -V | tail -1)
+          sudo xcode-select -s "/Applications/${XCODE}"
+          xcodebuild -version
+
+      - name: Run Unit Tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project FileRing.xcodeproj \
+            -scheme FileRing \
+            -destination 'platform=macOS' \
+            -enableCodeCoverage YES \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Manual \
+            2>&1 | tee build.log | grep -E "(error:|warning:|passed|failed|TEST)"
+          # Surface exit code from xcodebuild (pipefail ensures this)
+
+      - name: Show coverage summary
+        if: always()
+        run: |
+          if [ -d TestResults.xcresult ]; then
+            xcrun xccov view --report --only-targets TestResults.xcresult || true
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults-${{ github.run_number }}
+          path: |
+            TestResults.xcresult
+            build.log
+          retention-days: 14

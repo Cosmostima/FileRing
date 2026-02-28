@@ -492,45 +492,16 @@ class EventTapManager {
     }
 
     nonisolated private func isSingleModifierPressed(modifiers: [String]) -> Bool {
-        let requiredFlags = parseModifiers(modifiers)
-
-        // CRITICAL FIX: Filter out non-modifier flags (caps lock, fn, etc.)
-        let relevantMask: UInt64 = 0x100000 | 0x40000 | 0x20000 | 0x80000  // cmd|ctrl|shift|opt
-        let actualFlags = CGEventFlags(rawValue: modifierFlags.rawValue & relevantMask)
-
-        return actualFlags == requiredFlags
+        let currentFlags = CGEventFlags(rawValue: modifierFlags.rawValue)
+        return HotkeyMatchingRules.isSingleModifierOnly(currentFlags, expected: modifiers)
     }
 
     nonisolated private func modifiersMatch(_ flags: CGEventFlags, modifiers: [String]) -> Bool {
-        // CRITICAL FIX: Use EXACT match, not subset match
-        let requiredFlags = parseModifiers(modifiers)
-
-        let relevantMask: UInt64 = 0x100000 | 0x40000 | 0x20000 | 0x80000  // cmd|ctrl|shift|opt
-        let actualFlags = CGEventFlags(rawValue: flags.rawValue & relevantMask)
-
-        // Exact match required
-        return actualFlags == requiredFlags
+        return HotkeyMatchingRules.modifiersMatch(flags, required: modifiers)
     }
 
     nonisolated private func parseModifiers(_ modifiers: [String]) -> CGEventFlags {
-        var flags: CGEventFlags = []
-
-        for modifier in modifiers {
-            switch modifier.lowercased() {
-            case "command":
-                flags.insert(.maskCommand)
-            case "control":
-                flags.insert(.maskControl)
-            case "shift":
-                flags.insert(.maskShift)
-            case "option", "alt":
-                flags.insert(.maskAlternate)
-            default:
-                break
-            }
-        }
-
-        return flags
+        return HotkeyMatchingRules.parseModifiers(modifiers)
     }
 
     nonisolated private func disableEventTap() {
@@ -562,14 +533,8 @@ class EventTapManager {
 
 }
 
-// MARK: - CGEventFlags Extensions
-
-extension CGEventFlags {
-    nonisolated static var maskCommand: CGEventFlags { CGEventFlags(rawValue: 0x100000) }
-    nonisolated static var maskControl: CGEventFlags { CGEventFlags(rawValue: 0x40000) }
-    nonisolated static var maskShift: CGEventFlags { CGEventFlags(rawValue: 0x20000) }
-    nonisolated static var maskAlternate: CGEventFlags { CGEventFlags(rawValue: 0x80000) }
-}
+// CGEventFlags.maskCommand, .maskControl, .maskShift, .maskAlternate
+// are provided by CoreGraphics — see HotkeyMatchingRules.swift for the pure-function layer.
 
 // MARK: - Delegate Protocol
 

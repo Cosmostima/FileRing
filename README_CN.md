@@ -29,6 +29,12 @@ FileRing 提供一个圆形启动器，显示您最近和最常使用的文件�
 
 ![概览示例](Assets/OverView.gif)
 
+## 支持者
+
+感谢每一位支持这个项目的人！
+
+<a href="https://github.com/jilinju0715-pixel"><img src="Assets/supporters.svg" alt="jilinju0715-pixel" height="66"/></a>
+
 ## 功能特性
 
 ### 1. 文件分类
@@ -82,76 +88,27 @@ FileRing 是一个轻量级的菜单栏应用程序。Dock 图标和状态栏图
 
 ## 安装
 
-### 系统要求
+**系统要求：** macOS 13.0 或更高版本 · Apple Silicon 或 Intel
 
-- macOS 13.0 或更高版本
-- Apple Silicon 或 Intel 处理器
+### 直接下载（推荐）
 
-### 方式一：下载预编译版本（不推荐）
+1. 前往 [Releases](https://github.com/Cosmostima/FileRing/releases) 页面，下载最新的 `FileRing.dmg`
+2. 打开 DMG，将 `FileRing.app` 拖入应用程序文件夹
+3. 启动 FileRing，按提示授予所需权限
 
-**⚠️ 重要提示：**
+> 应用已通过 Apple 签名与公证，无需处理任何安全警告。
 
-由于缺少 Apple 开发者账户，预编译的应用程序**未经过公证或签名**。macOS 会显示安全警告。**强烈建议从源代码构建（方式二）。**
+### 从源代码构建
 
-**如果您仍想使用预编译版本：**
-
-1. 从 [Releases](https://github.com/Cosmostima/FileRing/releases) 页面下载最新版本
-2. 解压并将 `FileRing.app` 移动到应用程序文件夹
-3. 移除隔离属性：
-```bash
-   xattr -cr /Applications/FileRing.app
-```
-4. **或者**：右键点击 → "打开" → 在对话框中点击"打开"
-5. **如果仍然被阻止**：系统设置 → 隐私与安全性 → "仍要打开"
-6. 根据提示授予必要的权限
-
-### 方式二：从源代码构建（推荐）
-
-从源代码构建可让您使用自己的 Apple ID 签名应用程序，避免系统安全警告。
-
-
-#### GUI 方式（Xcode）
+适合希望修改或参与贡献的开发者：
 
 ```bash
-# 克隆仓库
 git clone https://github.com/Cosmostima/FileRing.git
 cd FileRing
-
-# 在 Xcode 中打开
 open FileRing.xcodeproj
 ```
 
-**在 Xcode 中：**
-1. 在导航器中选择 FileRing 项目
-2. 在 TARGETS 下选择 FileRing 目标
-3. 转到"Signing & Capabilities"标签
-4. 启用"Automatically manage signing"
-5. 在 Team 下拉菜单中选择您的 Apple ID（如需要请添加账户）
-6. 点击运行（⌘R）以构建和启动
-
-**导出独立应用程序：**
-1. Product → Archive
-2. 点击"Distribute App"
-3. 选择"Copy App"（可能在自定义选项中）
-4. 保存到所需位置
-
-#### 命令行方式
-
-```bash
-# 克隆仓库
-git clone https://github.com/Cosmostima/FileRing.git
-cd FileRing
-
-# 构建应用程序
-xcodebuild -project FileRing.xcodeproj -scheme FileRing -configuration Release -derivedDataPath build clean build
-
-# FileRing.app 将位于 build/Build/Products/Release/ 目录中
-# 然后您可以将其复制到 /Applications 文件夹
-cp -r build/Build/Products/Release/FileRing.app /Applications/
-open /Applications/FileRing.app
-```
-
-**注意：** 命令行构建需要至少在 Xcode 中配置一次代码签名。在使用 `xcodebuild` 之前，请在 Xcode 中打开项目并在"Signing & Capabilities"下设置您的 Apple ID。
+在 Xcode 的 **Signing & Capabilities** 中选择你的 Team，然后按 **⌘R** 构建运行。
 
 ## 使用方法
 
@@ -226,6 +183,8 @@ open /Applications/FileRing.app
 ## 灵感来源
 
 FileRing 的交互模型受到 [Loop](https://github.com/MrKai77/Loop) 的启发，这是一个优雅的 macOS 窗口管理工具。
+
+
 
 ## 许可证
 
