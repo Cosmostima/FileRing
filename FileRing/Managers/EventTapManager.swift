@@ -69,6 +69,7 @@ class EventTapManager {
 
     @MainActor weak var delegate: HotkeyManagerDelegate?
     @MainActor private var hotkeyState: HotkeyState = .idle
+    @MainActor private var healthCheckTimer: Timer?
 
     // MARK: - Initialization
 
@@ -118,35 +119,120 @@ class EventTapManager {
 
     func cleanup() {
         stopAndWait()
+        Task { @MainActor in
+            self.stopHealthCheck()
+        }
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self)
     }
 
-    // MARK: - Sleep/Wake Notifications
+    // MARK: - Health Check
+
+    @MainActor private func startHealthCheck() {
+        healthCheckTimer?.invalidate()
+        let block: @Sendable (Timer) -> Void = { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.performHealthCheck()
+            }
+        }
+        healthCheckTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true, block: block)
+    }
+
+    @MainActor private func stopHealthCheck() {
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = nil
+    }
+
+    @MainActor private func performHealthCheck() {
+        guard sharedState.withLock({ $0.isRunning }) else { return }
+
+        guard let tap = self.eventTap else {
+            // Tap is nil but isRunning is true — something went wrong, rebuild
+            os_log(.info, "Health check: event tap is nil, rebuilding")
+            rebuildEventTap()
+            return
+        }
+
+        if !CGEvent.tapIsEnabled(tap: tap) {
+            // Try re-enabling first
+            CGEvent.tapEnable(tap: tap, enable: true)
+
+            // Check again after re-enable attempt
+            if !CGEvent.tapIsEnabled(tap: tap) {
+                // Re-enable failed — full rebuild needed
+                os_log(.info, "Health check: event tap disabled and re-enable failed, rebuilding")
+                rebuildEventTap()
+            } else {
+                os_log(.info, "Health check: event tap was disabled, re-enabled successfully")
+            }
+        }
+    }
+
+    @MainActor private func rebuildEventTap() {
+        stopAndWait()
+        start()
+    }
+
+    // MARK: - Sleep/Wake & Screen/Session Notifications
 
     private func setupSleepWakeNotifications() {
-        NSWorkspace.shared.notificationCenter.addObserver(
+        let wsnc = NSWorkspace.shared.notificationCenter
+
+        // System sleep/wake
+        wsnc.addObserver(
             self,
             selector: #selector(handleWillSleep),
             name: NSWorkspace.willSleepNotification,
             object: nil
         )
-
-        NSWorkspace.shared.notificationCenter.addObserver(
+        wsnc.addObserver(
             self,
             selector: #selector(handleDidWake),
             name: NSWorkspace.didWakeNotification,
             object: nil
         )
+
+        // Screen lock/unlock (different from system sleep!)
+        wsnc.addObserver(
+            self,
+            selector: #selector(handleWillSleep),
+            name: NSWorkspace.screensDidSleepNotification,
+            object: nil
+        )
+        wsnc.addObserver(
+            self,
+            selector: #selector(handleDidWake),
+            name: NSWorkspace.screensDidWakeNotification,
+            object: nil
+        )
+
+        // Fast user switching
+        wsnc.addObserver(
+            self,
+            selector: #selector(handleDidWake),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil
+        )
+        wsnc.addObserver(
+            self,
+            selector: #selector(handleWillSleep),
+            name: NSWorkspace.sessionDidResignActiveNotification,
+            object: nil
+        )
     }
 
     @objc private func handleWillSleep() {
-        // System is about to sleep: stop event tap
-        stop()
+        // System is about to sleep / screen locked / session resigned:
+        // stop event tap synchronously.
+        // Must use stopAndWait() (not stop()) to ensure the old RunLoop and tap
+        // are fully cleaned up before the system sleeps. Otherwise, on wake the
+        // old RunLoop's deferred cleanup can race with start() and clobber the
+        // newly created tap (setting isRunning back to false / invalidating the new tap).
+        stopAndWait()
     }
 
     @objc private func handleDidWake() {
-        // System woke up: restart event tap
+        // System woke up / screen unlocked / session became active: restart event tap
         // Delay a bit to ensure system is stable
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
@@ -231,6 +317,11 @@ class EventTapManager {
         return hasPermission
     }
 
+    /// Whether the CGEvent tap is currently running and capturing events.
+    var isEventTapActive: Bool {
+        sharedState.withLock { $0.isRunning }
+    }
+
     func requestPermission() async -> Bool {
         Logger.main.info("Requesting Accessibility permission via system prompt...")
         let granted = AccessibilityHelper.requestPermission()
@@ -269,6 +360,7 @@ class EventTapManager {
         sharedState.withLock { $0.didConsumeKeyDown = false }
         Task { @MainActor in
             self.hotkeyState = .idle
+            self.stopHealthCheck()
         }
 
         if let runLoop = runLoop {
@@ -288,6 +380,7 @@ class EventTapManager {
         sharedState.withLock { $0.didConsumeKeyDown = false }
         Task { @MainActor in
             self.hotkeyState = .idle
+            self.stopHealthCheck()
         }
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -386,6 +479,15 @@ class EventTapManager {
 
         CGEvent.tapEnable(tap: tap, enable: true)
 
+        // EventTap is confirmed active — mark permission for this session and notify UI.
+        // This is more reliable than AXIsProcessTrustedWithOptions, which can return
+        // false for sandboxed apps even after the user has granted accessibility permission.
+        DispatchQueue.main.async {
+            AccessibilityHelper.markPermissionConfirmed()
+            NotificationCenter.default.post(name: .eventTapDidStart, object: nil)
+            self.startHealthCheck()
+        }
+
         CFRunLoopRun()
 
         // RunLoop exited (either via stop() or unexpectedly).
@@ -402,6 +504,13 @@ class EventTapManager {
         if type == .tapDisabledByTimeout {
             if let eventTap = self.eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
+                // If re-enable failed, schedule a full rebuild via health check
+                if !CGEvent.tapIsEnabled(tap: eventTap) {
+                    os_log(.info, "tapDisabledByTimeout: re-enable failed, scheduling rebuild")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.rebuildEventTap()
+                    }
+                }
             }
             return Unmanaged.passUnretained(event)
         }

@@ -8,16 +8,45 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import CoreGraphics
 
 @MainActor
 enum AccessibilityHelper {
 
+    /// Set once when permission is confirmed during this app session. Never reset.
+    /// All views read this flag to skip redundant re-checks.
+    private(set) static var permissionConfirmedThisSession = false
+
+    /// Mark accessibility permission as confirmed for the lifetime of this process.
+    static func markPermissionConfirmed() {
+        permissionConfirmedThisSession = true
+    }
+
     /// Check current accessibility permission status without prompting.
-    /// Uses AXIsProcessTrustedWithOptions which is more reliable than
-    /// CGPreflightPostEventAccess for reflecting post-grant state on macOS 13+.
+    /// Uses AXIsProcessTrustedWithOptions — kept for requestPermission() triggering only.
     static func checkPermission() -> Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
+    }
+
+    /// Check accessibility permission using CGEvent.tapCreate as the authoritative test.
+    /// More reliable than AXIsProcessTrustedWithOptions for sandboxed apps where TCC
+    /// may not reflect the granted state until the next app launch.
+    /// Uses .defaultTap (same mode as the real EventTap) to probe Accessibility permission —
+    /// NOT .listenOnly, which would probe Input Monitoring instead (a different TCC category).
+    /// The tap is immediately invalidated and never enabled, so no events are intercepted.
+    nonisolated static func checkPermissionViaTap() -> Bool {
+        let callback: CGEventTapCallBack = { _, _, event, _ in Unmanaged.passUnretained(event) }
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .tailAppendEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
+            callback: callback,
+            userInfo: nil
+        ) else { return false }
+        CFMachPortInvalidate(tap)
+        return true
     }
 
     /// Request accessibility permission, prompting the user via system dialog.

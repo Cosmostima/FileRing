@@ -57,28 +57,23 @@ struct OnboardingView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear {
-                checkPermissionStatus()
+            .onReceive(NotificationCenter.default.publisher(for: .eventTapDidStart)) { _ in
+                hasAccessibilityPermission = true
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                guard currentPage == 2, !hasAccessibilityPermission else { return }
-                if AccessibilityHelper.checkPermission() {
+            .task {
+                // Poll from first appearance (any page) so the EventTap starts ASAP.
+                if AccessibilityHelper.permissionConfirmedThisSession {
                     hasAccessibilityPermission = true
-                    stopObservingPermission()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        completeAndRestart()
-                    }
+                    return
                 }
-            }
-            .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-                guard currentPage == 2, !hasAccessibilityPermission else { return }
-                if AccessibilityHelper.checkPermission() {
-                    hasAccessibilityPermission = true
-                    stopObservingPermission()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        completeAndRestart()
+                repeat {
+                    if AccessibilityHelper.checkPermissionViaTap() {
+                        AccessibilityHelper.markPermissionConfirmed()
+                        hasAccessibilityPermission = true
+                        return
                     }
-                }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                } while !Task.isCancelled && !hasAccessibilityPermission
             }
 
             // Navigation buttons
@@ -388,25 +383,9 @@ struct OnboardingView: View {
             Spacer()
         }
         .padding()
-        .onChange(of: currentPage) { newPage in
-            if newPage == 2 {
-                checkPermissionStatus()
-            } else {
-                stopObservingPermission()
-            }
-        }
     }
 
     // MARK: - Permission Management
-
-    private func checkPermissionStatus() {
-        hasAccessibilityPermission = AccessibilityHelper.checkPermission()
-    }
-
-    private func stopObservingPermission() {
-        // Permission observation is handled by Timer and didBecomeActive receivers;
-        // this method is kept as a hook for future cleanup if needed.
-    }
 
     private func openAccessibilitySettings() {
         // Call with prompt=true to register the app in the Accessibility list,

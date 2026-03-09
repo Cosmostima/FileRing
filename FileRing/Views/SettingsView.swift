@@ -37,7 +37,6 @@ struct SettingsView: View {
 
     // Permission status
     @State private var hasAccessibilityPermission = false
-    @State private var showRestartPrompt = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -71,26 +70,24 @@ struct SettingsView: View {
         .onAppear {
             // Sync launch at login state from system
             launchAtLogin = launchAtLoginManager.isLaunchAtLoginEnabled
-            // Check permission status
-            checkPermissionStatus()
+            // Read session-level permission flag synchronously to avoid UI flash.
+            hasAccessibilityPermission = AccessibilityHelper.permissionConfirmedThisSession
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            let granted = AccessibilityHelper.checkPermission()
-            if granted && !hasAccessibilityPermission {
-                hasAccessibilityPermission = true
-                stopObservingPermission()
-                showRestartPrompt = true
-            } else {
-                hasAccessibilityPermission = granted
-            }
-        }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .eventTapDidStart)) { _ in
             guard !hasAccessibilityPermission else { return }
-            if AccessibilityHelper.checkPermission() {
-                hasAccessibilityPermission = true
-                stopObservingPermission()
-                showRestartPrompt = true
-            }
+            hasAccessibilityPermission = true
+        }
+        .task {
+            // Only poll if permission hasn't been confirmed yet in this session.
+            guard !AccessibilityHelper.permissionConfirmedThisSession else { return }
+            repeat {
+                if AccessibilityHelper.checkPermissionViaTap() {
+                    AccessibilityHelper.markPermissionConfirmed()
+                    hasAccessibilityPermission = true
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } while !Task.isCancelled && !hasAccessibilityPermission
         }
         .alert("Reset FileRing?", isPresented: $showResetAlert) {
             Button("Cancel", role: .cancel) { }
@@ -104,12 +101,6 @@ struct SettingsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(launchErrorMessage)
-        }
-        .alert("Accessibility Permission Granted", isPresented: $showRestartPrompt) {
-            Button("Restart Now") { restartApplication() }
-            Button("Later", role: .cancel) { }
-        } message: {
-            Text("FileRing needs to restart to activate the hotkey with the new permission.")
         }
         .alert("Folder Authorization Error", isPresented: $showBookmarkError) {
             Button("OK", role: .cancel) { }
@@ -215,7 +206,7 @@ struct SettingsView: View {
                     .buttonStyle(.borderedProminent)
                 } else {
                     Button("Refresh") {
-                        checkPermissionStatus()
+                        hasAccessibilityPermission = AccessibilityHelper.permissionConfirmedThisSession
                     }
                     .buttonStyle(.bordered)
                 }
@@ -541,15 +532,6 @@ struct SettingsView: View {
 
     // MARK: - Permission Management
 
-    private func checkPermissionStatus() {
-        hasAccessibilityPermission = AccessibilityHelper.checkPermission()
-    }
-
-    private func stopObservingPermission() {
-        // Permission observation is handled by Timer and didBecomeActive receivers;
-        // this method is kept as a hook for future cleanup if needed.
-    }
-
     private func openAccessibilitySettings() {
         // Call with prompt=true to register the app in the Accessibility list,
         // then open Settings so the user can enable the toggle.
@@ -557,7 +539,4 @@ struct SettingsView: View {
         AccessibilityHelper.openSystemSettings()
     }
 
-    private func restartApplication() {
-        AccessibilityHelper.restartApp()
-    }
 }

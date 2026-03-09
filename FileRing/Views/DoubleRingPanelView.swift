@@ -9,13 +9,12 @@ import SwiftUI
 import AppKit
 
 struct DoubleRingPanelView: View {
-    @StateObject private var viewModel: DoubleRingViewModel
+    @ObservedObject var viewModel: DoubleRingViewModel
     @State private var hoverState = HoverState()
     @State private var hoveredSection: PanelSection?
     @State private var lastHoveredPath: String?
     @State private var ringOpacity: Double = 0
     @State private var ringScale: CGFloat = 0.9
-    @State private var hasTriggeredInitialRefresh = false
 
     private enum Layout {
         static let panelSize: CGFloat = 900
@@ -37,23 +36,18 @@ struct DoubleRingPanelView: View {
     }
 
     @MainActor
-    init() {
-        _viewModel = StateObject(wrappedValue: DoubleRingViewModel())
+    init(viewModel: DoubleRingViewModel) {
+        _viewModel = ObservedObject(wrappedValue: viewModel)
     }
 
     var body: some View {
         content
             .frame(width: Layout.panelSize, height: Layout.panelSize)
-            .onAppear {
-                guard !hasTriggeredInitialRefresh else { return }
-                hasTriggeredInitialRefresh = true
-                Task { await refreshWithEntranceAnimation() }
-            }
             .onReceive(NotificationCenter.default.publisher(for: .triggerHoveredItem)) { _ in
                 performCurrentHoverAction()
             }
             .onReceive(NotificationCenter.default.publisher(for: .refreshPanel)) { _ in
-                Task { await refreshWithEntranceAnimation() }
+                triggerRingEntranceAnimation()
             }
             .onReceive(NotificationCenter.default.publisher(for: .hidePanel)) { _ in
                 hoverState.clear()
@@ -73,6 +67,8 @@ private extension DoubleRingPanelView {
 
             if viewModel.isInitialLoading {
                 loadingIndicator
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    .animation(.easeOut(duration: 0.2), value: viewModel.isInitialLoading)
             }
 
             if let error = viewModel.error {
@@ -81,7 +77,8 @@ private extension DoubleRingPanelView {
 
             if viewModel.isLoadingSection && !viewModel.isInitialLoading {
                 loadingIndicator
-                    .transition(.opacity)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    .animation(.easeOut(duration: 0.2), value: viewModel.isLoadingSection)
             }
         }
     }
@@ -170,16 +167,10 @@ extension DoubleRingPanelView {
 
 // MARK: - Hover handling
 private extension DoubleRingPanelView {
-    @MainActor
-    func refreshWithEntranceAnimation() async {
-        triggerRingEntranceAnimation()
-        await viewModel.refresh()
-    }
-
     func triggerRingEntranceAnimation() {
         ringOpacity = 0
-        ringScale = 0.9
-        withAnimation(.easeOut(duration: 0.05)) {
+        ringScale = 0.8
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
             ringOpacity = 1
             ringScale = 1
         }

@@ -17,4 +17,6 @@ extension Notification.Name {
     static let hotkeyRecordingEnded = Notification.Name("hotkeyRecordingEnded")
     static let spotlightConfigChanged = Notification.Name("spotlightConfigChanged")
     static let statusBarIconVisibilityChanged = Notification.Name("statusBarIconVisibilityChanged")
+    /// Posted on the main queue when the CGEvent tap successfully starts (i.e. accessibility permission is confirmed).
+    static let eventTapDidStart = Notification.Name("eventTapDidStart")
 }

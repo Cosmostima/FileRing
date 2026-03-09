@@ -21,19 +21,14 @@ class SpotlightManager: NSObject {
 
     // MARK: - File Queries
 
-    private func recentProgressiveWindows() -> [Int] {
-        let sameDayWindow = 1
-        let extended = max(sameDayWindow, config.recentDays)
-        if extended == sameDayWindow {
-            return [sameDayWindow]
-        }
-        return [sameDayWindow, extended]
+    private func recentDayWindow() -> Int {
+        max(1, config.recentDays)
     }
 
     /// Query recently opened files - sorted by last used date (newest first)
     func queryRecentlyOpenedFiles(limit: Int) async throws -> [FileSystemItem] {
         try await query(attribute: "kMDItemLastUsedDate",
-                        dayWindows: recentProgressiveWindows(),
+                        daysAgo: -recentDayWindow(),
                         isFolder: false,
                         sortBy: "kMDItemLastUsedDate",
                         limit: limit)
@@ -42,7 +37,7 @@ class SpotlightManager: NSObject {
     /// Query recently saved files - sorted by modification date (newest first)
     func queryRecentlySavedFiles(limit: Int) async throws -> [FileSystemItem] {
         try await query(attribute: "kMDItemFSContentChangeDate",
-                        dayWindows: recentProgressiveWindows(),
+                        daysAgo: -recentDayWindow(),
                         isFolder: false,
                         sortBy: "kMDItemFSContentChangeDate",
                         limit: limit)
@@ -59,7 +54,7 @@ class SpotlightManager: NSObject {
     /// Query recently opened folders - sorted by last used date (newest first)
     func queryRecentlyOpenedFolders(limit: Int) async throws -> [FileSystemItem] {
         try await query(attribute: "kMDItemLastUsedDate",
-                        dayWindows: recentProgressiveWindows(),
+                        daysAgo: -recentDayWindow(),
                         isFolder: true,
                         sortBy: "kMDItemLastUsedDate",
                         limit: limit)
@@ -68,7 +63,7 @@ class SpotlightManager: NSObject {
     /// Query recently modified folders - sorted by modification date (newest first)
     func queryRecentlyModifiedFolders(limit: Int) async throws -> [FileSystemItem] {
         try await query(attribute: "kMDItemFSContentChangeDate",
-                        dayWindows: recentProgressiveWindows(),
+                        daysAgo: -recentDayWindow(),
                         isFolder: true,
                         sortBy: "kMDItemFSContentChangeDate",
                         limit: limit)
@@ -83,39 +78,12 @@ class SpotlightManager: NSObject {
     // MARK: - Core Query Logic
 
     private func query(attribute: String, daysAgo: Int, isFolder: Bool, sortBy: String, limit: Int) async throws -> [FileSystemItem] {
-        let window = max(1, abs(daysAgo))
-        return try await query(attribute: attribute,
-                               dayWindows: [window],
-                               isFolder: isFolder,
-                               sortBy: sortBy,
-                               limit: limit)
-    }
+        let days = max(1, abs(daysAgo))
+        let descriptor = buildDescriptor(attribute: attribute, daysAgo: -days, isFolder: isFolder, sortBy: sortBy)
+        let items = try await engine.execute(descriptor)
 
-    private func query(attribute: String, dayWindows: [Int], isFolder: Bool, sortBy: String, limit: Int) async throws -> [FileSystemItem] {
-        let uniqueWindows = dayWindows.reduce(into: [Int]()) { acc, value in
-            let normalized = max(1, value)
-            if !acc.contains(normalized) {
-                acc.append(normalized)
-            }
-        }
-
-        var results: [FileSystemItem] = []
         var seenPaths = Set<String>()
-
-        for days in uniqueWindows {
-            if results.count >= limit { break }
-
-            let descriptor = buildDescriptor(attribute: attribute, daysAgo: -days, isFolder: isFolder, sortBy: sortBy)
-            let items = try await engine.execute(descriptor)
-
-            let parsed = parseItems(from: items,
-                                    limit: limit - results.count,
-                                    isFolder: isFolder,
-                                    seenPaths: &seenPaths)
-            results.append(contentsOf: parsed)
-        }
-
-        return results
+        return parseItems(from: items, limit: limit, isFolder: isFolder, seenPaths: &seenPaths)
     }
 
     private func buildDescriptor(attribute: String, daysAgo: Int, isFolder: Bool, sortBy: String) -> SpotlightQueryDescriptor {

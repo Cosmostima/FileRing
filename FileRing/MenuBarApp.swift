@@ -16,6 +16,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
     private var eventMonitor: Any?
     private var hostingView: NSHostingView<DoubleRingPanelView>?
+    private var viewModel: DoubleRingViewModel?
     private var eventTapManager: EventTapManager?
     private var accessibilityObserver: NSObjectProtocol?
 
@@ -121,17 +122,36 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         eventTapManager = EventTapManager()
         eventTapManager?.delegate = self
 
-        // Check permission
-        checkEventTapPermission()
+        // Delay permission check: AXIsProcessTrustedWithOptions can transiently return false
+        // for newly launched processes even when permission has already been granted,
+        // because macOS needs time to register the new process instance in the trust database.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.checkEventTapPermission()
+        }
     }
 
     private func checkEventTapPermission() {
         guard let manager = eventTapManager else { return }
 
-        if manager.checkPermission() {
-            manager.updateRegistration()
-        } else {
-            showAccessibilityPermissionGuide()
+        // Attempt EventTap creation unconditionally.
+        // AXIsProcessTrustedWithOptions can transiently return false just after launch
+        // (TCC database race condition); CGEvent.tapCreate is the authoritative check.
+        manager.updateRegistration()
+
+        // After a short delay, verify that the EventTap actually started.
+        // setupEventTap() runs on a background queue; 0.3s is enough for it to settle.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, let manager = self.eventTapManager else { return }
+
+            guard !manager.isEventTapActive else { return } // Running — all good.
+
+            if AccessibilityHelper.checkPermissionViaTap() {
+                // Permission IS granted but EventTap didn't start — transient timing glitch.
+                AccessibilityHelper.markPermissionConfirmed()
+                manager.start()
+            } else {
+                self.showAccessibilityPermissionGuide()
+            }
         }
     }
 
@@ -163,7 +183,9 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
 
     // MARK: - Popup Panel
     private func setupPopupPanel() {
-        let panelView = DoubleRingPanelView()
+        let vm = DoubleRingViewModel()
+        self.viewModel = vm
+        let panelView = DoubleRingPanelView(viewModel: vm)
         hostingView = NSHostingView(rootView: panelView)
 
         let panel = NSPanel(
@@ -209,7 +231,14 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
         panel.setFrame(newFrame, display: false)
         panel.orderFrontRegardless()
 
+        // Trigger entrance animation via notification, start data refresh directly
+        // — bypasses the SwiftUI notification round-trip for data loading
         NotificationCenter.default.post(name: .refreshPanel, object: nil)
+        if let viewModel = viewModel {
+            Task {
+                await viewModel.refresh()
+            }
+        }
     }
 
     private func hidePopupPanel(openSelection: Bool = true) {
@@ -217,7 +246,15 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
             NotificationCenter.default.post(name: .triggerHoveredItem, object: nil)
         }
         NotificationCenter.default.post(name: .hidePanel, object: nil)
-        popupPanel?.orderOut(nil)
+
+        guard let panel = popupPanel else { return }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.1
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak panel] in
+            panel?.orderOut(nil)
+            panel?.alphaValue = 1  // Reset for next show
+        })
     }
 
     // MARK: - Local Event Monitor
@@ -294,6 +331,14 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // If the EventTap is already running, notify the onboarding view once SwiftUI
+        // has had a chance to register its onReceive subscriptions (~0.2s is enough).
+        if eventTapManager?.isEventTapActive == true {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                NotificationCenter.default.post(name: .eventTapDidStart, object: nil)
+            }
+        }
     }
 
     // MARK: - Settings Window
@@ -326,6 +371,13 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
 
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // Notify the settings view of the current EventTap state once SwiftUI is ready.
+        if eventTapManager?.isEventTapActive == true {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                NotificationCenter.default.post(name: .eventTapDidStart, object: nil)
+            }
+        }
     }
 
     // MARK: - About
@@ -401,7 +453,7 @@ class MenuBarApp: NSObject, NSApplicationDelegate {
             // Slight delay: the notification fires before AXIsProcessTrusted updates
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 guard let manager = self.eventTapManager,
-                      manager.checkPermission() else { return }
+                      AccessibilityHelper.checkPermissionViaTap() else { return }
                 // Remove observer and force-restart EventTap with current config
                 if let observer = self.accessibilityObserver {
                     DistributedNotificationCenter.default().removeObserver(observer)

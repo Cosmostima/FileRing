@@ -44,8 +44,10 @@ final class DoubleRingViewModel: ObservableObject {
         defer { os_signpost(.end, log: .pointsOfInterest, name: "TotalLoadAndPreload", signpostID: signpostID) }
 
         startNewSession()
+        // Load only the current section first (no I/O contention from other queries),
+        // then preload remaining sections after the UI has updated.
         await loadInitialSection()
-        await preloadRemainingSections()
+        preloadRemainingSections()
     }
 
     func switchToSection(_ section: PanelSection) {
@@ -156,7 +158,7 @@ private extension DoubleRingViewModel {
         isInitialLoading = false
     }
 
-    func preloadRemainingSections() async {
+    func preloadRemainingSections() {
         cancelPreload()
 
         let sections = PanelSection.allCases
