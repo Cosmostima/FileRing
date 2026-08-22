@@ -1,3 +1,5 @@
+
+
 <div align="center">
 
 <img src="Assets/FileRingIcon.png" alt="FileRing Icon" width="200"/>
@@ -37,7 +39,7 @@ Thanks to everyone who has supported this project!
 
 ## Features
 
-### 1. File Categorizes
+### 1. File Categories
 
 FileRing categorizes your files and folders into six sections using macOS Spotlight:
 
